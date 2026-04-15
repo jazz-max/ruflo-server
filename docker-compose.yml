@@ -1,28 +1,26 @@
+# Standalone: поднимает ruflo + postgres вместе
+# Для встраивания в другие проекты см. README → "Встраивание как сервис"
+
 services:
   ruflo:
     build: .
-    # image: jazzmax/ruflo-server:latest  # use pre-built image from Docker Hub
-    container_name: ruflo-server
+    # image: jazzmax/ruflo-server:latest
     restart: unless-stopped
     ports:
       - "${RUFLO_PORT:-3000}:${RUFLO_PORT:-3000}"
     environment:
       RUFLO_PORT: ${RUFLO_PORT:-3000}
-      RUFLO_TRANSPORT: http
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: ruflo-db
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-ruflo}
       POSTGRES_USER: ${POSTGRES_USER:-ruflo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ruflo}
     depends_on:
-      postgres:
+      ruflo-db:
         condition: service_healthy
-    networks:
-      - ruflo-net
 
-  postgres:
+  ruflo-db:
     image: pgvector/pgvector:pg17
-    container_name: ruflo-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ruflo}
@@ -35,13 +33,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    networks:
-      - ruflo-net
 
 volumes:
   ruflo-pgdata:
     driver: local
-
-networks:
-  ruflo-net:
-    driver: bridge

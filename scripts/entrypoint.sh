@@ -12,16 +12,23 @@ export PGDATABASE="${POSTGRES_DB}"
 export PGUSER="${POSTGRES_USER}"
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
-# Wait for PostgreSQL to be ready
+# Wait for PostgreSQL to be ready (with timeout)
 echo "Waiting for PostgreSQL..."
+ATTEMPTS=0
+MAX_ATTEMPTS=60
 until pg_isready -q 2>/dev/null; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  if [ "${ATTEMPTS}" -ge "${MAX_ATTEMPTS}" ]; then
+    echo "ERROR: PostgreSQL not available after ${MAX_ATTEMPTS}s"
+    exit 1
+  fi
   sleep 1
 done
 echo "PostgreSQL is ready."
 
 # Initialize RuVector schema if not already done
 TABLE_EXISTS=$(psql -tAc \
-  "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'memory_entries');" 2>/dev/null || echo "false")
+  "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'claude_flow');" 2>/dev/null || echo "false")
 
 if [ "${TABLE_EXISTS}" = "f" ] || [ "${TABLE_EXISTS}" = "false" ]; then
   echo "Initializing RuVector schema..."
