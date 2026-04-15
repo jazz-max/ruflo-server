@@ -1,0 +1,46 @@
+#!/bin/bash
+set -e
+
+echo "=== Ruflo MCP Server ==="
+echo "Port: ${RUFLO_PORT}"
+echo "PostgreSQL: ${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+
+# Export PG* variables so all tools (psql, ruflo ruvector) use the correct host
+export PGHOST="${POSTGRES_HOST}"
+export PGPORT="${POSTGRES_PORT}"
+export PGDATABASE="${POSTGRES_DB}"
+export PGUSER="${POSTGRES_USER}"
+export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+# Wait for PostgreSQL to be ready
+echo "Waiting for PostgreSQL..."
+until pg_isready -q 2>/dev/null; do
+  sleep 1
+done
+echo "PostgreSQL is ready."
+
+# Initialize RuVector schema if not already done
+TABLE_EXISTS=$(psql -tAc \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'memory_entries');" 2>/dev/null || echo "false")
+
+if [ "${TABLE_EXISTS}" = "f" ] || [ "${TABLE_EXISTS}" = "false" ]; then
+  echo "Initializing RuVector schema..."
+  npx ruflo ruvector init \
+    --database "${POSTGRES_DB}" \
+    --user "${POSTGRES_USER}" \
+    --host "${POSTGRES_HOST}" \
+    --port "${POSTGRES_PORT}" \
+    || echo "RuVector init skipped (may need manual setup)"
+else
+  echo "RuVector schema already exists."
+fi
+
+# Ruflo MCP works only in stdio mode.
+# supergateway wraps stdio → SSE/HTTP so clients can connect over network.
+echo "Starting Ruflo MCP via supergateway on port ${RUFLO_PORT}..."
+exec npx supergateway \
+  --stdio "npx ruflo@latest mcp start" \
+  --port "${RUFLO_PORT}" \
+  --baseUrl "http://0.0.0.0:${RUFLO_PORT}" \
+  --ssePath /sse \
+  --messagePath /message

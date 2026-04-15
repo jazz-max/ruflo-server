@@ -1,0 +1,5 @@
+.env
+.swarm/
+node_modules/
+data/
+.idea/
