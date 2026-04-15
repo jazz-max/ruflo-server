@@ -2,6 +2,8 @@
 
 Docker-образ для централизованного Ruflo MCP-сервера с PostgreSQL (RuVector).
 
+> **Подробный гайд по мультипроектной работе с ruflo** — передача знаний, координация задач, claims, hive-mind, ограничения stdio vs ruflo-server: [docs/ruflo-multiproject-guide.md](docs/ruflo-multiproject-guide.md)
+
 ```
 Ruflo MCP (stdio) → supergateway (SSE/HTTP) → порт 3000
                           ↕
