@@ -29,5 +29,3 @@ jobs:
           tags: |
             jazzmax/ruflo-hub:latest
             jazzmax/ruflo-hub:${{ github.sha }}
-            jazzmax/ruflo-server:latest
-            jazzmax/ruflo-server:${{ github.sha }}

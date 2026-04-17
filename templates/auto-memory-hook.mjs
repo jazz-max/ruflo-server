@@ -82,12 +82,10 @@ function getRufloUrl() {
     } catch { /* ignore */ }
   }
 
-  // 3. Auto-discover from sibling ruflo-hub project (with legacy ruflo-server fallback)
+  // 3. Auto-discover from sibling ruflo-hub project
   const knownPaths = [
     join(dirname(PROJECT_ROOT), 'ruflo-hub'),
     join(PROJECT_ROOT, '..', 'ruflo-hub'),
-    join(dirname(PROJECT_ROOT), 'ruflo-server'),
-    join(PROJECT_ROOT, '..', 'ruflo-server'),
   ];
   for (const p of knownPaths) {
     // Read host from .env or docker-compose

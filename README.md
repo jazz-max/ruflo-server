@@ -2,8 +2,6 @@
 
 Центральный MCP-хаб для команды: HTTP-обёртка над Ruflo CLI (250+ инструментов), shared memory между сессиями Claude Code, statusline с remote-данными. Активная память — локальный sql.js; PostgreSQL (pgvector) — **опциональный** бэкап для `ruflo ruvector import/export`.
 
-> **Переименование:** проект назывался `ruflo-server` до 2026-04-17. Старый Docker-tag `jazzmax/ruflo-server:latest` остаётся как deprecated alias — обновитесь на `jazzmax/ruflo-hub:latest`. GitHub redirect работает автоматически.
-
 > **Гайды:**
 > - [Use cases](docs/use-cases.md) — сценарии для личного/командного/мульти-командного использования, перенос паттернов между инстансами
 > - [Swarm management](docs/swarm-management.md) — управление роями: концепция, lifecycle, квирки ruflo@3.5.x
