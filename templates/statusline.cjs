@@ -484,6 +484,11 @@ function getRemoteAgentDBStats() {
         } : null,
         remote: true,
       };
+      // Detect inconsistency: vectors exist but dbSizeKB=0 means MCP timed out
+      // OR /app/.swarm was briefly unavailable. Reuse previous good value if we have one.
+      if (data.dbSizeKB === 0 && data.vectorCount > 0 && cache && cache.data && cache.data.dbSizeKB > 0) {
+        data.dbSizeKB = cache.data.dbSizeKB;
+      }
       try {
         const dataDir = path.join(CWD, '.claude-flow', 'data');
         if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });

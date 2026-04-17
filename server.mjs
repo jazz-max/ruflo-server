@@ -115,8 +115,16 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', tools: toolsResult.tools.length });
 });
 
+// Call an MCP tool with a hard timeout. Returns null if the tool hangs or errors.
+function callToolWithTimeout(name, args, timeoutMs = 2000) {
+  return Promise.race([
+    client.callTool({ name, arguments: args }).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
+
 // GET /stats — summary for statusline clients (no auth, like /health).
-// Tries memory_stats first, falls back to memory_list for vector counting.
+// Uses strict per-tool timeouts so a busy MCP stdio queue cannot block the endpoint.
 app.get('/stats', async (_req, res) => {
   const summary = { status: 'ok', vectorCount: 0, namespaces: 0, tools: toolsResult.tools.length, source: 'none' };
 
@@ -141,9 +149,21 @@ app.get('/stats', async (_req, res) => {
     }
   };
 
-  // Try memory_stats
+  // Disk size — compute FIRST without MCP so it's always accurate regardless of stdio queue.
+  summary.dbSizeKB = 0;
   try {
-    const result = await client.callTool({ name: 'memory_stats', arguments: {} });
+    const files = readdirSync('/app/.swarm');
+    for (const fname of files) {
+      try {
+        const s = statSync(join('/app/.swarm', fname));
+        if (s.isFile()) summary.dbSizeKB += Math.round(s.size / 1024);
+      } catch { /* ignore per-file */ }
+    }
+  } catch { /* dir missing — dbSizeKB stays 0 */ }
+
+  // Try memory_stats (2s timeout — if MCP stdio is busy, skip rather than block)
+  {
+    const result = await callToolWithTimeout('memory_stats', {}, 2000);
     const text = result?.content?.[0]?.text || '';
     const parsed = extractCount(text);
     if (parsed) {
@@ -151,26 +171,24 @@ app.get('/stats', async (_req, res) => {
       summary.namespaces = parsed.namespaces;
       summary.source = 'memory_stats';
     }
-  } catch { /* fall through */ }
+  }
 
   // Fallback: memory_list
   if (summary.vectorCount === 0) {
-    try {
-      const result = await client.callTool({ name: 'memory_list', arguments: {} });
-      const text = result?.content?.[0]?.text || '';
-      const parsed = extractCount(text);
-      if (parsed) {
-        summary.vectorCount = parsed.count;
-        if (!summary.namespaces) summary.namespaces = parsed.namespaces;
-        summary.source = summary.source === 'none' ? 'memory_list' : summary.source;
-      }
-    } catch { /* ignore */ }
+    const result = await callToolWithTimeout('memory_list', {}, 2000);
+    const text = result?.content?.[0]?.text || '';
+    const parsed = extractCount(text);
+    if (parsed) {
+      summary.vectorCount = parsed.count;
+      if (!summary.namespaces) summary.namespaces = parsed.namespaces;
+      summary.source = summary.source === 'none' ? 'memory_list' : summary.source;
+    }
   }
 
   // Swarm status
   summary.swarm = { active: false, agentCount: 0, maxAgents: 0, topology: null };
-  try {
-    const result = await client.callTool({ name: 'swarm_status', arguments: {} });
+  {
+    const result = await callToolWithTimeout('swarm_status', {}, 2000);
     const text = result?.content?.[0]?.text || '';
     try {
       const parsed = JSON.parse(text);
@@ -179,11 +197,11 @@ app.get('/stats', async (_req, res) => {
       summary.swarm.maxAgents = Number(parsed.maxAgents) || 0;
       summary.swarm.topology = parsed.topology || null;
     } catch { /* ignore */ }
-  } catch { /* ignore */ }
+  }
 
   // Real agent count (swarm_status.agentCount may lag behind agent_spawn)
-  try {
-    const result = await client.callTool({ name: 'agent_list', arguments: {} });
+  {
+    const result = await callToolWithTimeout('agent_list', {}, 2000);
     const text = result?.content?.[0]?.text || '';
     try {
       const parsed = JSON.parse(text);
@@ -193,38 +211,26 @@ app.get('/stats', async (_req, res) => {
       else if (typeof parsed?.total === 'number') count = parsed.total;
       if (count > summary.swarm.agentCount) summary.swarm.agentCount = count;
     } catch { /* ignore */ }
-  } catch { /* ignore */ }
-
-  // Disk size of sql.js memory
-  summary.dbSizeKB = 0;
-  for (const fname of ['memory.db', 'memory.db-wal', 'memory.db-shm']) {
-    try {
-      const s = statSync(join('/app/.swarm', fname));
-      summary.dbSizeKB += Math.round(s.size / 1024);
-    } catch { /* ignore */ }
   }
 
-  // Intelligence score (best effort — try neural_status, then hooks_intelligence_stats)
+  // Intelligence score (best effort — try only one tool with short timeout, skip fancy loops)
   summary.intelligence = { score: 0, source: 'none' };
-  for (const toolName of ['neural_status', 'hooks_intelligence_stats', 'hooks_intelligence']) {
+  {
+    const result = await callToolWithTimeout('neural_status', {}, 1500);
+    const text = result?.content?.[0]?.text || '';
     try {
-      const result = await client.callTool({ name: toolName, arguments: {} });
-      const text = result?.content?.[0]?.text || '';
-      try {
-        const parsed = JSON.parse(text);
-        const score = parsed?.intelligence?.score
-                   ?? parsed?.score
-                   ?? parsed?.intelligenceScore
-                   ?? parsed?.stats?.intelligence_score
-                   ?? parsed?.accuracy
-                   ?? 0;
-        if (score > 0) {
-          summary.intelligence.score = Math.min(100, Math.floor(Number(score) * (score <= 1 ? 100 : 1)));
-          summary.intelligence.source = toolName;
-          break;
-        }
-      } catch { /* ignore */ }
-    } catch { /* tool may not exist */ }
+      const parsed = JSON.parse(text);
+      const score = parsed?.intelligence?.score
+                 ?? parsed?.score
+                 ?? parsed?.intelligenceScore
+                 ?? parsed?.stats?.intelligence_score
+                 ?? parsed?.accuracy
+                 ?? 0;
+      if (score > 0) {
+        summary.intelligence.score = Math.min(100, Math.floor(Number(score) * (score <= 1 ? 100 : 1)));
+        summary.intelligence.source = 'neural_status';
+      }
+    } catch { /* ignore */ }
   }
 
   res.json(summary);
