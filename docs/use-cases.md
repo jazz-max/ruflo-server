@@ -21,12 +21,14 @@
 ```bash
 # В проекте A
 cd ~/projects/my-app-a
-curl http://localhost:3000/setup | bash
+curl "http://$(hostname):3000/setup" | bash
 
 # В проекте B
 cd ~/projects/my-app-b
-curl http://localhost:3000/setup | bash
+curl "http://$(hostname):3000/setup" | bash
 ```
+
+> **Не используй IP (`192.168.x.x`)** — при смене Wi-Fi/VPN адрес меняется и ruflo.json указывает в никуда. `$(hostname)` на macOS даёт `MacBook-Pro-3.local` — стабильно работает через Bonjour/mDNS.
 
 После этого Claude Code в обоих проектах:
 - Видит MCP-инструменты `mcp__ruflo__*` (257 tools)

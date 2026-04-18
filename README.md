@@ -239,6 +239,24 @@ curl "http://192.168.1.100:3001/setup?token=TOKEN_A&name=ruflo-alpha" | bash
 curl "http://192.168.1.100:3002/setup?token=TOKEN_B&name=ruflo-beta" | bash
 ```
 
+#### ⚠️ Сервер на той же машине — используй hostname, не IP
+
+Если ruflo-hub поднят **у тебя на буке/ноутбуке**, не привязывайся к IP — он меняется при переключении Wi-Fi/VPN. Используй mDNS-имя машины (macOS и большинство Linux поддерживают `.local` из коробки через Bonjour/Avahi):
+
+```bash
+# macOS/Linux — подстановка имени хоста
+curl "http://$(hostname):3201/setup?token=TOKEN" | bash
+
+# Явно:
+curl "http://MacBook-Pro-3.local:3201/setup?token=TOKEN" | bash
+```
+
+Это же правило применимо к `.claude-flow/ruflo.json` и `.mcp.json` — в них лучше хранить `http://MacBook-Pro-3.local:3201/mcp`, а не IP. Тогда клиент продолжит работать при любой смене сети.
+
+**Когда НЕ подходит `.local`:**
+- Клиенты вне локалки (VPN другой команды, удалённый сервер на VPS) — им `hostname.local` не зарезолвится. Там нужен публичный DNS (`ruflo.mycompany.com`) или туннель (Tailscale/Cloudflare Tunnel).
+- В компаниях с рестриктивной сетью — Bonjour/mDNS может быть выключен ИТ. Проверь через `ping $(hostname)` с клиентской машины.
+
 ### Ручное подключение MCP
 
 Если нужно добавить только MCP без хуков и моста памяти:
