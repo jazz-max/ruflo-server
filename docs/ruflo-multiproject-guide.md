@@ -1,233 +1,233 @@
-# Ruflo — мультипроектный сценарий для команды разработчиков
+# Ruflo — multi-project scenario for a development team
 
-## Что такое Ruflo
+## What is Ruflo
 
-Ruflo — платформа для оркестрации AI-агентов, работающая через MCP-протокол. Включает семантическую память с векторными эмбеддингами, обучение на паттернах, координацию задач и кросс-проектный поиск знаний.
+Ruflo is a platform for orchestrating AI agents, operating through the MCP protocol. It includes semantic memory with vector embeddings, learning from patterns, task coordination, and cross-project knowledge search.
 
-Данные хранятся локально в `.swarm/memory.db` (sql.js + HNSW-индексы) в корне каждого проекта.
+Data is stored locally in `.swarm/memory.db` (sql.js + HNSW indexes) at the root of each project.
 
-## Архитектура
+## Architecture
 
 ```
 ~/.claude/projects/
-├── project-a/memory/     ← Claude Code память (markdown)
+├── project-a/memory/     ← Claude Code memory (markdown)
 ├── project-b/memory/
 ├── project-c/memory/
 └── ...
 
-Каждый проект → свой .swarm/memory.db (локальный)
+Each project → its own .swarm/memory.db (local)
                     ↓
-        Ruflo объединяет в единую векторную базу
-        с семантическим поиском по всем проектам
+        Ruflo combines them into a single vector database
+        with semantic search across all projects
 ```
 
-## Ключевые инструменты
+## Key tools
 
-### 1. Импорт памяти из всех проектов
+### 1. Import memory from all projects
 
 ```
 memory_import_claude (allProjects: true)
 ```
 
-Подтягивает Claude Code память из всех проектов в единую базу с ONNX-эмбеддингами (all-MiniLM-L6-v2, 384-dim). После этого доступен **семантический поиск** по знаниям из любого проекта:
+Pulls Claude Code memory from all projects into a single database with ONNX embeddings (all-MiniLM-L6-v2, 384-dim). After this, **semantic search** is available over knowledge from any project:
 
-> «Как мы решали проблему с кодировкой?» → найдёт ответ, даже если решение было в другом проекте
+> "How did we solve the encoding problem?" → will find the answer even if the solution was in another project
 
-### 2. Namespace-изоляция
+### 2. Namespace isolation
 
-`memory_store` поддерживает `namespace` для логического разделения данных:
+`memory_store` supports `namespace` for logical data separation:
 
 ```
-namespace: "project-a"        → знания конкретного проекта
-namespace: "project-b"        → другой проект
-namespace: "team-backend"     → общие знания backend-команды
-namespace: "team-frontend"    → общие знания frontend-команды
-namespace: "shared"           → кросс-проектные решения и архитектура
-namespace: "conventions"      → общие правила кодирования
+namespace: "project-a"        → knowledge of a specific project
+namespace: "project-b"        → another project
+namespace: "team-backend"     → shared knowledge of the backend team
+namespace: "team-frontend"    → shared knowledge of the frontend team
+namespace: "shared"           → cross-project solutions and architecture
+namespace: "conventions"      → shared coding rules
 ```
 
 ### 3. Unified Search
 
 ```
-memory_search_unified (query: "текст запроса")
+memory_search_unified (query: "query text")
 ```
 
-Ищет одновременно по Claude Code памяти и AgentDB по всем namespace. Полезно когда не знаешь, в каком проекте было решение.
+Searches simultaneously across Claude Code memory and AgentDB across all namespaces. Useful when you don't know which project contained the solution.
 
-### 4. Координация задач
+### 4. Task coordination
 
-Две системы с разным назначением:
+Two systems with different purposes:
 
-**Tasks** — простой трекер для внутренних агентов ruflo:
+**Tasks** — a simple tracker for ruflo's internal agents:
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |-----------|-----------|
-| `task_create` | Создать задачу (тип, приоритет, теги) |
-| `task_assign` | Назначить на внутреннего агента ruflo |
-| `task_update / task_complete` | Обновить прогресс / завершить |
-| `task_list / task_summary` | Список и сводка по статусам |
+| `task_create` | Create a task (type, priority, tags) |
+| `task_assign` | Assign to an internal ruflo agent |
+| `task_update / task_complete` | Update progress / complete |
+| `task_list / task_summary` | List and summary by status |
 
-**Claims** — координация между людьми и агентами (кто что делает, чтобы не дублировать работу):
+**Claims** — coordination between people and agents (who is doing what, so work isn't duplicated):
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |-----------|-----------|
-| `claims_claim` | Застолбить задачу за собой (человек или агент) |
-| `claims_handoff` | Передать задачу другому с прогрессом и причиной |
-| `claims_mark-stealable / claims_steal` | Пометить как свободную / забрать себе |
-| `claims_rebalance` | Перебалансировка нагрузки между агентами |
-| `claims_board` | Визуальная доска (канбан по статусам) |
+| `claims_claim` | Claim a task for yourself (human or agent) |
+| `claims_handoff` | Hand off a task to someone else with progress and reason |
+| `claims_mark-stealable / claims_steal` | Mark as free / take it for yourself |
+| `claims_rebalance` | Rebalance load between agents |
+| `claims_board` | Visual board (kanban by status) |
 
-> **Когда что использовать:** Tasks — для одиночной работы и автоматизации через агентов ruflo. Claims — для командной координации, когда несколько человек или Claude Code сессий работают параллельно.
+> **When to use what:** Tasks — for solo work and automation via ruflo agents. Claims — for team coordination, when multiple people or Claude Code sessions work in parallel.
 >
-> **Важно:** В claims нет отдельной команды «создать задачу». Задача создаётся автоматически при первом `claims_claim` — ты указываешь `issueId` (например, номер из Linear или GitHub), и claims регистрирует захват. Claims — это реестр «кто что взял», а не трекер задач.
+> **Important:** Claims has no separate "create a task" command. A task is created automatically on the first `claims_claim` — you specify an `issueId` (e.g., a number from Linear or GitHub), and claims registers the claim. Claims is a registry of "who took what", not a task tracker.
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |-----------|-----------|
-| `workflow_create / workflow_execute` | Шаблонизация повторяющихся процессов |
+| `workflow_create / workflow_execute` | Templating recurring processes |
 
-### 5. Обучение на паттернах
+### 5. Learning from patterns
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |-----------|-----------|
-| `hooks_intelligence_pattern-store` | Сохранение паттерна решения |
-| `hooks_intelligence_pattern-search` | Поиск похожих паттернов |
-| `autopilot_predict` | Предсказание на основе выученных паттернов |
-| `guidance_recommend` | Рекомендации по подходу |
+| `hooks_intelligence_pattern-store` | Save a solution pattern |
+| `hooks_intelligence_pattern-search` | Search for similar patterns |
+| `autopilot_predict` | Prediction based on learned patterns |
+| `guidance_recommend` | Recommendations on approach |
 
-Ruflo учится на действиях разработчика: какие команды запускаются, какие ошибки исправляются, какие решения принимаются. Паттерны хранятся с confidence-скорингом и temporal decay (полупериод: 30 дней).
+Ruflo learns from developer actions: which commands are run, which errors are fixed, which decisions are made. Patterns are stored with confidence scoring and temporal decay (half-life: 30 days).
 
-## Примеры организации для команд
+## Team organization examples
 
-### Вариант A: разделение по ролям
+### Option A: split by roles
 
 ```
-Команда Backend:
+Backend team:
   namespace: "team-backend"
-  → ORM-паттерны, миграции, API-контракты
+  → ORM patterns, migrations, API contracts
 
-Команда Frontend:
+Frontend team:
   namespace: "team-frontend"
-  → компоненты, стейт-менеджмент, стили
+  → components, state management, styles
 
-Общее:
+Shared:
   namespace: "shared"
-  → архитектурные решения, интеграции
+  → architectural decisions, integrations
 ```
 
-### Вариант B: разделение по проектам
+### Option B: split by projects
 
 ```
-namespace: "project-{name}"     → контекст каждого проекта
-namespace: "conventions"         → общие правила кодирования
-namespace: "incidents"           → разборы инцидентов
+namespace: "project-{name}"     → context of each project
+namespace: "conventions"         → shared coding rules
+namespace: "incidents"           → incident post-mortems
 ```
 
-### Вариант C: гибридный
+### Option C: hybrid
 
 ```
-namespace: "project-{name}"              → проект
-namespace: "team-{role}"                 → команда
-namespace: "shared"                      → общее
-namespace: "onboarding"                  → для новых сотрудников
+namespace: "project-{name}"              → project
+namespace: "team-{role}"                 → team
+namespace: "shared"                      → shared
+namespace: "onboarding"                  → for new employees
 ```
 
-## Hive-Mind (мультиагентный режим)
+## Hive-Mind (multi-agent mode)
 
-Ruflo поддерживает коллективный интеллект — несколько агентов работают параллельно в рамках одной сессии:
+Ruflo supports collective intelligence — several agents work in parallel within a single session:
 
 ```
 hive-mind_init (topology: "mesh" | "hierarchical" | "ring" | "star")
 hive-mind_spawn (count: N, role: "worker" | "specialist" | "scout")
-hive-mind_memory — общая память роя
-hive-mind_consensus — достижение консенсуса между агентами
-coordination_orchestrate — оркестрация (parallel / sequential / pipeline / broadcast)
+hive-mind_memory — shared swarm memory
+hive-mind_consensus — reaching consensus between agents
+coordination_orchestrate — orchestration (parallel / sequential / pipeline / broadcast)
 ```
 
-Применение: параллельный анализ кода, распределённый код-ревью, одновременная работа над несколькими модулями.
+Applications: parallel code analysis, distributed code review, simultaneous work on multiple modules.
 
-## Централизованный сервер для команды
+## Centralized server for a team
 
-Локальный режим (`.swarm/` на каждой машине) ограничивает ruflo рамками одного разработчика. Централизованный MCP-сервер снимает это ограничение.
+Local mode (`.swarm/` on each machine) limits ruflo to a single developer. A centralized MCP server removes this limitation.
 
-### Архитектура
+### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Выделенный сервер (ruflo-hub)                   │
+│  Dedicated server (ruflo-hub)                       │
 │                                                     │
 │  Ruflo MCP (stdio) → supergateway (SSE/HTTP)        │
-│  ├── RuVector → PostgreSQL     ← общая база знаний  │
-│  └── порт 3000                                      │
+│  ├── RuVector → PostgreSQL     ← shared knowledge base  │
+│  └── port 3000                                      │
 └───────────────┬─────────────────┬───────────────────┘
                 │                 │
         ┌───────┘                 └────────┐
         ▼                                  ▼
-  Разработчик A                      Разработчик B
+  Developer A                        Developer B
   Claude Code                        Claude Code
   settings.json:                     settings.json:
   ruflo → http://server:3000         ruflo → http://server:3000
 ```
 
-### Нужен ли серверу доступ к проектам?
+### Does the server need access to projects?
 
-**Нет.** Ruflo MCP-сервер — это «мозг» (база знаний + координатор), а не «руки».
+**No.** The Ruflo MCP server is the "brain" (knowledge base + coordinator), not the "hands".
 
 ```
-Ruflo MCP-сервер                        Claude Code (клиент)
+Ruflo MCP server                         Claude Code (client)
 ─────────────────                        ────────────────────
-Хранит память и паттерны                 Читает/пишет файлы проекта
-Координирует задачи                      Делает git diff, анализирует код
-Ищет по эмбеддингам                      Передаёт данные в ruflo в параметрах
-Обучается на паттернах                   Получает рекомендации от ruflo
-НЕ читает исходный код проектов          Имеет полный доступ к проекту
+Stores memory and patterns               Reads/writes project files
+Coordinates tasks                        Runs git diff, analyzes code
+Searches by embeddings                   Passes data to ruflo as parameters
+Learns from patterns                     Receives recommendations from ruflo
+Does NOT read project source code        Has full access to the project
 ```
 
-Все инструменты ruflo получают данные **через параметры запросов** от Claude Code:
+All ruflo tools receive data **through request parameters** from Claude Code:
 
-- `memory_store(key, value)` — клиент передаёт текст, сервер сохраняет
-- `memory_search(query)` — клиент передаёт запрос, сервер ищет по эмбеддингам
-- `analyze_diff(...)` — клиент передаёт diff, сервер анализирует
-- `task_create(...)` — клиент описывает задачу, сервер координирует
+- `memory_store(key, value)` — client passes text, server saves
+- `memory_search(query)` — client passes query, server searches by embeddings
+- `analyze_diff(...)` — client passes diff, server analyzes
+- `task_create(...)` — client describes the task, server coordinates
 
-Сервер **не ходит в файловую систему проектов**, не читает исходный код и не обращается к git. Это значит:
+The server **does not access the filesystem of projects**, does not read source code, and does not touch git. This means:
 
-- Сервер можно разместить на отдельной машине без исходников
-- Не нужно монтировать проекты или давать доступ к репозиториям
-- Безопаснее — сервер хранит только абстрактные знания, не код
+- The server can be hosted on a separate machine without source code
+- No need to mount projects or grant access to repositories
+- More secure — the server stores only abstract knowledge, not code
 
-> **Исключение:** `memory_import_claude` — читает `~/.claude/projects/*/memory/*.md` с локального диска. В централизованном режиме не используется — клиенты пушат знания через `memory_store`.
+> **Exception:** `memory_import_claude` — reads `~/.claude/projects/*/memory/*.md` from the local disk. Not used in centralized mode — clients push knowledge via `memory_store`.
 
-### Запуск MCP-сервера
+### Running the MCP server
 
-> **Важно:** Ruflo MCP работает только в stdio-режиме (v3.5). Для сетевого доступа используется [ruflo-hub](https://github.com/jazz-max/ruflo-hub) — Docker-контейнер с supergateway-прокси, оборачивающим stdio в SSE/HTTP.
+> **Important:** Ruflo MCP works only in stdio mode (v3.5). For network access, use [ruflo-hub](https://github.com/jazz-max/ruflo-hub) — a Docker container with a supergateway proxy that wraps stdio into SSE/HTTP.
 >
-> В stdio-режиме claims, tasks, hive-mind видны между сессиями **одного проекта**, но **не между проектами** (у каждого проекта свой процесс). Подробности и полная таблица → [Ограничения stdio-режима](#ограничения-stdio-режима-важно).
+> In stdio mode, claims, tasks, and hive-mind are visible between sessions **of one project**, but **not between projects** (each project has its own process). Details and the full table → [stdio mode limitations](#stdio-mode-limitations-important).
 
-> **Почему не `--transport http`?** CLI ruflo принимает флаг `--transport http`, но в коде `startHttpServer()` делает `import('@claude-flow/mcp')` — этот пакет **не существует** (не опубликован в npm, это заглушка под будущую функциональность). Запуск упадёт с `Cannot find module '@claude-flow/mcp'`. Единственный рабочий транспорт — stdio. Для сетевого доступа нужен внешний прокси (supergateway), и именно это делает [ruflo-hub](https://github.com/jazz-max/ruflo-hub).
+> **Why not `--transport http`?** The ruflo CLI accepts the `--transport http` flag, but in the code `startHttpServer()` does `import('@claude-flow/mcp')` — this package **does not exist** (not published to npm, it's a placeholder for future functionality). Startup will fail with `Cannot find module '@claude-flow/mcp'`. The only working transport is stdio. For network access you need an external proxy (supergateway), and that's exactly what [ruflo-hub](https://github.com/jazz-max/ruflo-hub) does.
 
-**Способ 1: Docker Compose** (рекомендуемый):
+**Method 1: Docker Compose** (recommended):
 
 ```bash
 git clone https://github.com/jazz-max/ruflo-hub.git
 cd ruflo-hub
 cp .env.example .env
-# Отредактировать .env:
-#   RUFLO_PORT=3000           — порт сервера
-#   POSTGRES_PASSWORD=...     — пароль БД
-#   POSTGRES_DATA=ruflo-pgdata — том для данных
+# Edit .env:
+#   RUFLO_PORT=3000           — server port
+#   POSTGRES_PASSWORD=...     — DB password
+#   POSTGRES_DATA=ruflo-pgdata — volume for data
 docker compose up -d
 
-# Проверить
+# Check
 curl http://localhost:3000/health
 ```
 
-> **Важно:** Образ `jazzmax/ruflo-hub` **не содержит PostgreSQL** — только Node.js, ruflo, supergateway и postgresql-client. PostgreSQL поднимается отдельным контейнером (`ruflo-db`) через docker-compose.
+> **Important:** The `jazzmax/ruflo-hub` image **does not contain PostgreSQL** — only Node.js, ruflo, supergateway, and postgresql-client. PostgreSQL is spun up in a separate container (`ruflo-db`) via docker-compose.
 
-**Способ 1б: Docker Hub образ** (если PostgreSQL уже есть):
+**Method 1b: Docker Hub image** (if PostgreSQL already exists):
 
 ```bash
-# PostgreSQL с pgvector должен быть запущен и доступен.
-# Обычный postgres:17 без pgvector не подойдёт — нужен pgvector/pgvector:pg17.
+# PostgreSQL with pgvector must be running and accessible.
+# Plain postgres:17 without pgvector will not work — you need pgvector/pgvector:pg17.
 docker run -d --name ruflo-personal \
   -p 3000:3000 \
   -e RUFLO_PORT=3000 \
@@ -238,41 +238,41 @@ docker run -d --name ruflo-personal \
   -e POSTGRES_PASSWORD=mysecret \
   jazzmax/ruflo-hub:latest
 
-# Проверить
+# Check
 curl http://localhost:3000/health
 ```
 
-> `POSTGRES_HOST` — IP или hostname существующего сервера PostgreSQL. При запуске в Docker-сети можно указать имя контейнера (например, `postgres`). Схема RuVector (`claude_flow`) будет создана автоматически при первом старте.
+> `POSTGRES_HOST` — IP or hostname of an existing PostgreSQL server. When running in a Docker network, you can specify the container name (e.g., `postgres`). The RuVector schema (`claude_flow`) will be created automatically on first start.
 
-Параметры `.env`:
+`.env` parameters:
 
-| Переменная | По умолчанию | Описание |
+| Variable | Default | Description |
 |---|---|---|
-| `RUFLO_PORT` | `3000` | Порт, на котором слушает supergateway |
-| `POSTGRES_HOST` | `ruflo-db` | Хост PostgreSQL (в compose — имя сервиса) |
-| `POSTGRES_PORT` | `5432` | Порт PostgreSQL |
-| `POSTGRES_DB` | `ruflo` | Имя базы данных |
-| `POSTGRES_USER` | `ruflo` | Пользователь БД |
-| `POSTGRES_PASSWORD` | `ruflo` | Пароль БД (**обязательно сменить!**) |
-| `POSTGRES_DATA` | `ruflo-pgdata` | Docker volume для данных PostgreSQL |
+| `RUFLO_PORT` | `3000` | Port that supergateway listens on |
+| `POSTGRES_HOST` | `ruflo-db` | PostgreSQL host (in compose — the service name) |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `ruflo` | Database name |
+| `POSTGRES_USER` | `ruflo` | DB user |
+| `POSTGRES_PASSWORD` | `ruflo` | DB password (**must be changed!**) |
+| `POSTGRES_DATA` | `ruflo-pgdata` | Docker volume for PostgreSQL data |
 
-Внутри контейнера:
+Inside the container:
 ```
-Ruflo MCP (stdio) → supergateway (SSE/HTTP) → порт 3000
+Ruflo MCP (stdio) → supergateway (SSE/HTTP) → port 3000
                           ↕
                     PostgreSQL + pgvector (RuVector)
 ```
 
-**Способ 2: ручной запуск** (без Docker, если нужен кастомный сетап):
+**Method 2: manual startup** (without Docker, if you need a custom setup):
 
 ```bash
 npm install -g ruflo@latest pg supergateway
 
-# 1. PostgreSQL с pgvector должен быть установлен и запущен
-# 2. Инициализировать RuVector
+# 1. PostgreSQL with pgvector must be installed and running
+# 2. Initialize RuVector
 npx ruflo ruvector init --database ruflo_team --user ruflo_admin --host localhost
 
-# 3. Запустить через supergateway
+# 3. Start via supergateway
 npx supergateway \
   --stdio "npx ruflo@latest mcp start" \
   --port 3000 \
@@ -281,9 +281,9 @@ npx supergateway \
   --messagePath /message
 ```
 
-### Подключение клиентов
+### Connecting clients
 
-Все клиенты подключаются к SSE-эндпоинту. Конфигурация одинаковая для всех IDE.
+All clients connect to the SSE endpoint. Configuration is the same for all IDEs.
 
 **Claude Code CLI:**
 ```bash
@@ -305,7 +305,7 @@ claude mcp add ruflo-team --url http://your-server:3000/sse
 }
 ```
 
-> Для локальной разработки (без централизованного сервера) можно использовать stdio-режим напрямую:
+> For local development (without a centralized server) you can use stdio mode directly:
 > ```json
 > {
 >   "mcpServers": {
@@ -317,598 +317,598 @@ claude mcp add ruflo-team --url http://your-server:3000/sse
 > }
 > ```
 
-> Для подключения красивого статус бара в терминале со счетчиками ruflo в папке проекта:
+> To enable a nice status bar in the terminal with ruflo counters in the project folder:
 ```bash
 npx ruflo@latest init --only-claude 
 ```
 
-### Варианты хранения
+### Storage options
 
-| Вариант | Конкурентный доступ | Масштаб | Рекомендация |
+| Option | Concurrent access | Scale | Recommendation |
 |---------|---------------------|---------|--------------|
-| SQLite (`.swarm/memory.db`) | Single-writer, блокировки | 1-2 человека | Для одного разработчика |
-| PostgreSQL (RuVector) | Полноценный, 52K+ inserts/sec | Команда любого размера | **Для команды** |
-| Git (коммит `.swarm/`) | Ручной, конфликты в бинарных файлах | 2-3 человека | Крайний случай |
+| SQLite (`.swarm/memory.db`) | Single-writer, locks | 1-2 people | For a single developer |
+| PostgreSQL (RuVector) | Full, 52K+ inserts/sec | Team of any size | **For a team** |
+| Git (commit `.swarm/`) | Manual, conflicts in binary files | 2-3 people | Last resort |
 
-### RuVector PostgreSQL — почему для команды
+### RuVector PostgreSQL — why for a team
 
-RuVector — мост ruflo к PostgreSQL с 77+ SQL-функциями для AI-операций:
+RuVector is ruflo's bridge to PostgreSQL with 77+ SQL functions for AI operations:
 
-- **HNSW/IVF** индексирование для векторного поиска
-- **52,000+ inserts/sec** — нет блокировок SQLite
-- **39 Attention-механизмов** — Multi-head, Flash, Sparse, Linear
-- **15 типов GNN-слоёв** — GCN, GAT, GraphSAGE
-- **Self-Learning** — оптимизатор запросов с EWC++
-- **Hyperbolic Embeddings** — Poincaré, Lorentz, Klein модели
+- **HNSW/IVF** indexing for vector search
+- **52,000+ inserts/sec** — no SQLite locks
+- **39 Attention mechanisms** — Multi-head, Flash, Sparse, Linear
+- **15 types of GNN layers** — GCN, GAT, GraphSAGE
+- **Self-Learning** — query optimizer with EWC++
+- **Hyperbolic Embeddings** — Poincaré, Lorentz, Klein models
 
-**Предварительно:** установить PostgreSQL на сервер (apt, brew, Docker — любым способом). RuVector не устанавливает PostgreSQL сам, а инициализирует схему и AI-функции в существующей базе.
+**Prerequisite:** install PostgreSQL on the server (apt, brew, Docker — any way). RuVector does not install PostgreSQL itself; it initializes the schema and AI functions in an existing database.
 
 ```bash
-# 1. PostgreSQL уже установлен и запущен
-# 2. Создать базу и пользователя (стандартный psql)
+# 1. PostgreSQL is already installed and running
+# 2. Create database and user (standard psql)
 createdb ruflo_team
 createuser ruflo_admin
 
-# 3. Инициализировать RuVector-схему (77+ AI-функций, HNSW-индексы)
+# 3. Initialize RuVector schema (77+ AI functions, HNSW indexes)
 npx ruflo ruvector init --database ruflo_team --user ruflo_admin
 
-# Мониторинг и обслуживание
+# Monitoring and maintenance
 npx ruflo ruvector status --verbose
 npx ruflo ruvector benchmark --iterations 1000
 npx ruflo ruvector optimize --analyze
 npx ruflo ruvector backup --output ./backup.sql
 ```
 
-### Организация namespace для команды
+### Namespace organization for a team
 
 ```
-namespace: "dev:{username}"           → личное пространство разработчика
-namespace: "project:{project-name}"   → знания проекта
-namespace: "team:{team-name}"         → командные конвенции
-namespace: "shared"                   → кросс-проектные решения
-namespace: "incidents"                → разборы инцидентов
-namespace: "onboarding"               → для новых сотрудников
+namespace: "dev:{username}"           → developer's personal space
+namespace: "project:{project-name}"   → project knowledge
+namespace: "team:{team-name}"         → team conventions
+namespace: "shared"                   → cross-project solutions
+namespace: "incidents"                → incident post-mortems
+namespace: "onboarding"               → for new employees
 ```
 
-### Как вызывать инструменты ruflo
+### How to invoke ruflo tools
 
-Ruflo предоставляет 80+ инструментов (например `memory_store`, `claims_board`, `analyze_diff-risk`). Это **MCP-инструменты**, а не bash-команды — их нельзя набрать в терминале напрямую.
+Ruflo provides 80+ tools (for example, `memory_store`, `claims_board`, `analyze_diff-risk`). These are **MCP tools**, not bash commands — they cannot be typed directly in the terminal.
 
-**Способ 1: Через Claude Code (основной)**
+**Method 1: Via Claude Code (primary)**
 
-Просто попросить Claude на человеческом языке:
+Just ask Claude in natural language:
 ```
-> Покажи доску задач ruflo
-> Сохрани в ruflo: решение проблемы с кодировкой — использовать iconv
-> Оцени риски моего diff через ruflo
+> Show the ruflo task board
+> Save to ruflo: solution to the encoding problem — use iconv
+> Assess the risks of my diff through ruflo
 ```
-Claude сам вызовет нужный MCP-инструмент с правильными параметрами.
+Claude will invoke the appropriate MCP tool with the correct parameters itself.
 
-**Способ 2: Через ruflo CLI (частичное покрытие)**
+**Method 2: Via the ruflo CLI (partial coverage)**
 
-Некоторые инструменты имеют CLI-эквиваленты:
+Some tools have CLI equivalents:
 ```bash
-npx ruflo memory store --key "fix" --value "описание решения"
-npx ruflo memory retrieve --query "кодировка"
+npx ruflo memory store --key "fix" --value "solution description"
+npx ruflo memory retrieve --query "encoding"
 npx ruflo hive-mind status
 npx ruflo swarm status
 npx ruflo mcp status
 npx ruflo mcp health
 ```
-Но не все MCP-инструменты имеют CLI-аналоги. `claims_board`, `analyze_diff-risk`, `hive-mind_memory` — только через MCP (т.е. через Claude).
+But not all MCP tools have CLI counterparts. `claims_board`, `analyze_diff-risk`, `hive-mind_memory` — only via MCP (i.e., via Claude).
 
-**Способ 3: Через MCP Inspector (отладка и администрирование)**
+**Method 3: Via the MCP Inspector (debugging and administration)**
 
-Веб-интерфейс для прямого вызова любого MCP-инструмента с параметрами:
+A web interface for directly invoking any MCP tool with parameters:
 ```bash
 npx @modelcontextprotocol/inspector npx ruflo@latest mcp start
 ```
-Открывает браузер → выбираете инструмент → заполняете параметры → вызываете. Полезно для администратора сервера при отладке и наполнении базы знаний.
+Opens the browser → you select a tool → fill in parameters → invoke. Useful for a server administrator when debugging and populating the knowledge base.
 
 ---
 
-### Реальные сценарии
+### Real-world scenarios
 
-**1. Передача знаний**
+**1. Knowledge transfer**
 
-Разработчик A решил сложную проблему → сохранил паттерн → разработчик B через неделю сталкивается с похожей → `memory_search` находит решение.
+Developer A solved a complex problem → saved the pattern → developer B a week later runs into a similar one → `memory_search` finds the solution.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Сохранить решение
-> Сохрани в ruflo в namespace shared: при параллельных воркерах на одну очередь 
-> возникает deadlock, решение — добавить --tries=3 и unique job ID. Теги: queue, deadlock
+# Save the solution
+> Save to ruflo in namespace shared: with parallel workers on a single queue,
+> a deadlock occurs, the solution is to add --tries=3 and a unique job ID. Tags: queue, deadlock
 
-# Найти решение
-> Поищи в ruflo: воркеры блокируют друг друга
+# Find the solution
+> Search ruflo: workers blocking each other
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Разработчик A: сохраняет решение
+# Developer A: saves the solution
 memory_store(
   key: "fix-deadlock-queue-workers",
-  value: "При параллельных воркерах на одну очередь возникает deadlock. 
-          Решение: добавить --tries=3 и unique job ID. 
-          См. коммит abc123.",
+  value: "With parallel workers on a single queue, a deadlock occurs.
+          Solution: add --tries=3 and a unique job ID.
+          See commit abc123.",
   namespace: "shared",
   tags: ["queue", "deadlock", "workers"]
 )
 
-# Разработчик B: через неделю ищет решение похожей проблемы
+# Developer B: a week later searches for a solution to a similar problem
 memory_search(
-  query: "воркеры блокируют друг друга",
+  query: "workers blocking each other",
   namespace: "shared"
 )
-# → находит запись fix-deadlock-queue-workers по семантическому сходству
+# → finds the fix-deadlock-queue-workers entry by semantic similarity
 ```
 
 </details>
 
-**2. Код-ревью**
+**2. Code review**
 
-Оценка рисков и подбор ревьюеров по git-истории.
+Risk assessment and reviewer selection based on git history.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Полный анализ
-> Проанализируй через ruflo риски моего diff относительно main, 
-> подбери ревьюеров и классифицируй тип изменений
+# Full analysis
+> Analyze via ruflo the risks of my diff relative to main,
+> pick reviewers, and classify the type of change
 
-# Оценка конкретного файла
-> Оцени через ruflo риск изменений в app/Services/PaymentService.php
+# Assess a specific file
+> Assess via ruflo the risk of changes in app/Services/PaymentService.php
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Оценить риски текущего diff
+# Assess the risks of the current diff
 analyze_diff-risk(ref: "main..feature-branch")
-# → возвращает: risk score, затронутые модули, тип изменений
+# → returns: risk score, affected modules, type of changes
 
-# Кого позвать на ревью (по истории правок затронутых файлов)
+# Who to invite for review (based on history of edits to the affected files)
 analyze_diff-reviewers(ref: "main..feature-branch", limit: 3)
-# → возвращает: список разработчиков, кто чаще всего правил эти файлы
+# → returns: list of developers who most often edited these files
 
-# Классификация изменений (фича / баг-фикс / рефакторинг)
+# Classify the change (feature / bug fix / refactoring)
 analyze_diff-classify(ref: "main..feature-branch")
 
-# Риск конкретного файла
+# Risk of a specific file
 analyze_file-risk(path: "app/Services/PaymentService.php", additions: 50, deletions: 20)
 ```
 
 </details>
 
-**3. Онбординг**
+**3. Onboarding**
 
-Новый сотрудник подключает Claude Code к серверу → получает актуальные знания.
+A new employee connects Claude Code to the server → gets up-to-date knowledge.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Наполнение базы знаний (делает тимлид)
-> Сохрани в ruflo namespace onboarding инструкцию по деплою: 
-> git push origin main → CI тесты → sail artisan migrate → sail npm run build.
-> Откат: git revert + migrate:rollback. Теги: deploy, ci
+# Populating the knowledge base (the tech lead does this)
+> Save to ruflo namespace onboarding the deployment instructions:
+> git push origin main → CI tests → sail artisan migrate → sail npm run build.
+> Rollback: git revert + migrate:rollback. Tags: deploy, ci
 
-> Сохрани в ruflo namespace onboarding инструкцию по локальной установке:
+> Save to ruflo namespace onboarding the local installation instructions:
 > git clone, cp .env.example .env, sail up -d, sail artisan migrate,
-> sail npm run dev. Теги: setup, docker
+> sail npm run dev. Tags: setup, docker
 
-# Поиск новым сотрудником
-> Как развернуть проект локально? Поищи в ruflo в onboarding
+# Search by the new employee
+> How do I deploy the project locally? Search ruflo in onboarding
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Админ: заранее наполняет namespace onboarding
+# Admin: populates the onboarding namespace ahead of time
 memory_store(
   key: "deploy-guide",
-  value: "Деплой: git push origin main → CI прогоняет тесты → 
-          sail artisan migrate → sail npm run build. 
-          Откат: git revert + sail artisan migrate:rollback.",
+  value: "Deploy: git push origin main → CI runs tests →
+          sail artisan migrate → sail npm run build.
+          Rollback: git revert + sail artisan migrate:rollback.",
   namespace: "onboarding",
   tags: ["deploy", "ci"]
 )
 
 memory_store(
   key: "local-setup",
-  value: "1. git clone ... 2. cp .env.example .env 
-          3. sail up -d 4. sail artisan migrate 
-          5. sail npm run dev — Vite на порту 5176",
+  value: "1. git clone ... 2. cp .env.example .env
+          3. sail up -d 4. sail artisan migrate
+          5. sail npm run dev — Vite on port 5176",
   namespace: "onboarding",
   tags: ["setup", "docker"]
 )
 
-# Новый сотрудник: ищет как поднять проект
-memory_search(query: "как развернуть проект локально", namespace: "onboarding")
-# → находит local-setup
+# New employee: looks up how to bring up the project
+memory_search(query: "how to deploy the project locally", namespace: "onboarding")
+# → finds local-setup
 
-memory_search(query: "как деплоить на прод", namespace: "onboarding")
-# → находит deploy-guide
+memory_search(query: "how to deploy to prod", namespace: "onboarding")
+# → finds deploy-guide
 ```
 
 </details>
 
-**4. Координация задач**
+**4. Task coordination**
 
-Несколько разработчиков работают параллельно → claims предотвращает дублирование работы.
+Several developers work in parallel → claims prevents duplicate work.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Взять задачу
-> Заклеймь в ruflo задачу PROJ-42 за мной (Алексей), 
-> я буду рефакторить PaymentService
+# Take a task
+> Claim task PROJ-42 in ruflo for me (Alexey),
+> I'm going to refactor PaymentService
 
-# Что сейчас в работе
-> Покажи все активные задачи в ruflo
+# What's currently in progress
+> Show all active tasks in ruflo
 
-# Передать задачу
-> Передай в ruflo задачу PROJ-42 от меня (Алексей) Борису, 
-> готово на 60%, переключаюсь на hotfix
+# Hand off a task
+> Hand off task PROJ-42 in ruflo from me (Alexey) to Boris,
+> 60% done, switching to a hotfix
 
-# Доска задач
-> Покажи доску задач ruflo
+# Task board
+> Show the ruflo task board
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Разработчик A: берёт задачу
+# Developer A: takes the task
 claims_claim(
   issueId: "PROJ-42",
-  claimant: "human:dev-a:Алексей",
-  context: "Рефакторинг PaymentService — выношу в отдельный модуль"
+  claimant: "human:dev-a:Alexey",
+  context: "Refactoring PaymentService — extracting it into a separate module"
 )
 
-# Разработчик B: видит что задача занята
+# Developer B: sees that the task is taken
 claims_list(status: "active")
-# → PROJ-42: claimed by human:dev-a:Алексей
+# → PROJ-42: claimed by human:dev-a:Alexey
 
-# Разработчик A: передаёт задачу (заболел / переключился)
+# Developer A: hands off the task (got sick / switched)
 claims_handoff(
   issueId: "PROJ-42",
-  from: "human:dev-a:Алексей",
-  to: "human:dev-b:Борис",
-  reason: "Переключаюсь на hotfix, модуль готов на 60%",
+  from: "human:dev-a:Alexey",
+  to: "human:dev-b:Boris",
+  reason: "Switching to a hotfix, module is 60% done",
   progress: 60
 )
 
-# Разработчик B: принимает
+# Developer B: accepts
 claims_claim(
   issueId: "PROJ-42",
-  claimant: "human:dev-b:Борис",
-  context: "Продолжаю рефакторинг с 60%"
+  claimant: "human:dev-b:Boris",
+  context: "Continuing the refactor from 60%"
 )
 
-# Посмотреть доску всех задач
+# View the board of all tasks
 claims_board()
 ```
 
 </details>
 
-**4б. Задача между сессиями Claude Code (через stealable)**
+**4b. A task between Claude Code sessions (via stealable)**
 
-Сценарий: в одном проекте поставить задачу, в другом — выполнить. Оба проекта подключены к одному ruflo-personal.
+Scenario: create a task in one project, execute it in another. Both projects are connected to the same ruflo-personal.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Сессия A (проект Alpha): создать и отпустить задачу
-> Заклеймь в ruflo-personal задачу update-ruflo-notion-wiki за мной (Иван): 
-> обновить статью в Notion WIKI — убраны английские промпты, добавлена 
-> секция Tasks vs Claims. Пометь как stealable — выполнять буду в другой сессии
+# Session A (project Alpha): create and release the task
+> Claim the task update-ruflo-notion-wiki in ruflo-personal for me (Ivan):
+> update an article in Notion WIKI — removed English prompts, added
+> a Tasks vs Claims section. Mark as stealable — I'll execute it in another session
 
-# Сессия B (другой проект): найти и забрать задачу
-> Покажи свободные задачи в ruflo-personal
+# Session B (another project): find and take the task
+> Show the free tasks in ruflo-personal
 
-# Сессия B: забрать и выполнить
-> Забери задачу update-ruflo-notion-wiki и выполни её
+# Session B: take and execute
+> Take the task update-ruflo-notion-wiki and execute it
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Сессия A: создаём задачу (claim создаёт запись при первом вызове)
+# Session A: create the task (claim creates the record on the first call)
 claims_claim(
   issueId: "update-ruflo-notion-wiki",
-  claimant: "human:ivan:Иван",
-  context: "Обновить статью в Notion WIKI по ruflo. Правки: убраны английские 
-            промпты, добавлена секция Tasks vs Claims. Инструкции по Notion — 
-            в памяти ruflo-personal."
+  claimant: "human:ivan:Ivan",
+  context: "Update an article in Notion WIKI about ruflo. Edits: removed English
+            prompts, added a Tasks vs Claims section. Notion instructions are
+            in ruflo-personal memory."
 )
 
-# Сессия A: помечаем как свободную для другой сессии
+# Session A: mark as free for another session
 claims_mark-stealable(
   issueId: "update-ruflo-notion-wiki",
   reason: "voluntary",
-  context: "Выполнить в сессии с доступом к Notion"
+  context: "Execute in a session with access to Notion"
 )
 
-# Сессия B: смотрим свободные задачи
+# Session B: look at free tasks
 claims_stealable()
-# → update-ruflo-notion-wiki: stealable (voluntary), контекст правок внутри
+# → update-ruflo-notion-wiki: stealable (voluntary), context of the edits inside
 
-# Сессия B: забираем задачу
+# Session B: take the task
 claims_steal(
   issueId: "update-ruflo-notion-wiki",
-  stealer: "human:ivan:Иван"
+  stealer: "human:ivan:Ivan"
 )
-# → статус: active, можно выполнять
+# → status: active, can be executed
 
-# Сессия B: после выполнения — завершаем
+# Session B: after execution — complete
 claims_status(
   issueId: "update-ruflo-notion-wiki",
   status: "completed",
-  note: "Notion WIKI обновлена"
+  note: "Notion WIKI updated"
 )
 ```
 
 </details>
 
-**4в. Командная доска задач (через ruflo-hub)**
+**4c. Team task board (via ruflo-hub)**
 
-Сценарий: команда подключена к общему ruflo-hub (HTTP). Тимлид ставит задачу, разработчик забирает. Все видят одну доску.
+Scenario: the team is connected to a shared ruflo-hub (HTTP). The tech lead creates a task, a developer takes it. Everyone sees the same board.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Тимлид: поставить задачу и пометить как свободную
-> Заклеймь в ruflo-team задачу FIX-auth-redirect за меня (Лена): 
-> после логина редирект на /dashboard не работает, куки не пробрасываются. 
-> Пометь как stealable
+# Tech lead: create a task and mark it as free
+> Claim task FIX-auth-redirect in ruflo-team for me (Lena):
+> after login the redirect to /dashboard doesn't work, cookies aren't being forwarded.
+> Mark as stealable
 
-# Разработчик: посмотреть свободные задачи
-> Покажи свободные задачи в ruflo-team
+# Developer: look at free tasks
+> Show the free tasks in ruflo-team
 
-# Разработчик: забрать задачу
-> Забери в ruflo-team задачу FIX-auth-redirect за меня (Алексей)
+# Developer: take the task
+> Take task FIX-auth-redirect in ruflo-team for me (Alexey)
 
-# Разработчик: обновить прогресс
-> Обнови в ruflo-team статус FIX-auth-redirect — прогресс 70%, 
-> нашёл причину: SameSite=Strict на куке
+# Developer: update progress
+> Update the status of FIX-auth-redirect in ruflo-team — progress 70%,
+> found the cause: SameSite=Strict on the cookie
 
-# Разработчик: завершить
-> Заверши в ruflo-team задачу FIX-auth-redirect — исправлено, PR #87
+# Developer: complete
+> Complete task FIX-auth-redirect in ruflo-team — fixed, PR #87
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Тимлид: создаёт задачу и сразу отпускает
+# Tech lead: creates the task and immediately releases it
 claims_claim(
   issueId: "FIX-auth-redirect",
-  claimant: "human:lena:Лена",
-  context: "После логина редирект на /dashboard не работает, 
-            куки не пробрасываются через middleware"
+  claimant: "human:lena:Lena",
+  context: "After login the redirect to /dashboard doesn't work,
+            cookies aren't being forwarded through middleware"
 )
 claims_mark-stealable(
   issueId: "FIX-auth-redirect",
   reason: "voluntary",
-  context: "Нужен кто-то из бекенд-команды"
+  context: "Need someone from the backend team"
 )
 
-# Разработчик: видит свободные задачи
+# Developer: sees free tasks
 claims_stealable()
-# → FIX-auth-redirect: stealable, контекст про куки внутри
+# → FIX-auth-redirect: stealable, context about cookies inside
 
-# Разработчик: забирает
+# Developer: takes it
 claims_steal(
   issueId: "FIX-auth-redirect",
-  stealer: "human:alexey:Алексей"
+  stealer: "human:alexey:Alexey"
 )
 
-# Разработчик: обновляет прогресс
+# Developer: updates progress
 claims_status(
   issueId: "FIX-auth-redirect",
   status: "active",
   progress: 70,
-  note: "Причина: SameSite=Strict на куке"
+  note: "Cause: SameSite=Strict on the cookie"
 )
 
-# Разработчик: завершает
+# Developer: completes
 claims_status(
   issueId: "FIX-auth-redirect",
   status: "completed",
-  note: "Исправлено, PR #87"
+  note: "Fixed, PR #87"
 )
 ```
 
 </details>
 
-**5. Общий контекст через Hive-Mind**
+**5. Shared context via Hive-Mind**
 
-Общая память для координации параллельной работы.
+Shared memory for coordinating parallel work.
 
-Промпты для Claude Code:
+Prompts for Claude Code:
 ```
-# Записать план
-> Запиши в hive-mind ruflo план рефакторинга auth: выносим в отдельный пакет, 
-> НЕ трогать middleware до вторника, API-контракт: POST /api/auth/login, 
+# Record the plan
+> Record in ruflo hive-mind the auth refactoring plan: extract into a separate package,
+> do NOT touch middleware until Tuesday, API contract: POST /api/auth/login,
 > POST /api/auth/refresh
 
-# Прочитать план
-> Что в hive-mind ruflo по рефакторингу auth?
+# Read the plan
+> What's in ruflo hive-mind about the auth refactor?
 
-# Оповещение
-> Разошли через ruflo hive-mind всем: мёрж-фриз до 17:00, деплой релиза. 
-> Приоритет высокий
+# Notification
+> Broadcast via ruflo hive-mind to everyone: merge freeze until 5:00 PM, release deploy.
+> High priority
 
-# Список всего в общей памяти
-> Покажи всё что есть в hive-mind памяти ruflo
+# List everything in shared memory
+> Show everything in ruflo hive-mind memory
 ```
 
 <details>
-<summary>Вызовы инструментов (что Claude выполнит)</summary>
+<summary>Tool invocations (what Claude will execute)</summary>
 
 ```bash
-# Лид: записывает контекст рефакторинга
+# Lead: records the refactoring context
 hive-mind_memory(
   action: "set",
   key: "refactor-auth-plan",
-  value: "Выносим auth в отдельный пакет. НЕ трогать middleware до вторника. 
-          API-контракт: POST /api/auth/login, POST /api/auth/refresh."
+  value: "Extract auth into a separate package. Do NOT touch middleware until Tuesday.
+          API contract: POST /api/auth/login, POST /api/auth/refresh."
 )
 
-# Любой разработчик: читает контекст
+# Any developer: reads the context
 hive-mind_memory(action: "get", key: "refactor-auth-plan")
 
-# Оповестить всех агентов
+# Notify all agents
 hive-mind_broadcast(
-  message: "Мёрж-фриз до 17:00, деплой релиза",
+  message: "Merge freeze until 5:00 PM, release deploy",
   priority: "high"
 )
 
-# Посмотреть все ключи общей памяти
+# View all keys of shared memory
 hive-mind_memory(action: "list")
 ```
 
 </details>
 
-### Удалённый запуск агентов
+### Remote agent launching
 
-**Можно ли с одного рабочего места запустить агента на другом?**
+**Can I launch an agent on another machine from my workstation?**
 
-Нет. Ruflo-server координирует знания и задачи, но не управляет Claude Code на чужих машинах.
+No. Ruflo-server coordinates knowledge and tasks, but does not manage Claude Code on other people's machines.
 
 ```
-Машина Алексея                 Ruflo Server                Машина Бориса
+Alexey's machine              Ruflo Server                Boris's machine
 ┌────────────────┐            ┌────────────────┐          ┌────────────────┐
-│ Claude Code    │─MCP-запрос─│ Память         │─MCP-запр─│ Claude Code    │
-│ (свой процесс) │            │ Задачи         │          │ (свой процесс) │
-│ читает/пишет   │            │ Координация    │          │ читает/пишет   │
-│ СВОИ файлы     │            │                │          │ СВОИ файлы     │
+│ Claude Code    │─MCP request─│ Memory        │─MCP request─│ Claude Code    │
+│ (its own proc) │            │ Tasks          │          │ (its own proc) │
+│ reads/writes   │            │ Coordination   │          │ reads/writes   │
+│ ITS OWN files  │            │                │          │ ITS OWN files  │
 └────────────────┘            └────────────────┘          └────────────────┘
 ```
 
-- `agent_spawn` создаёт агента **внутри** ruflo-сервера или текущей Claude Code сессии — не на чужой машине
-- `claims_handoff` передаёт **метаданные** задачи — Борис должен сам запустить Claude Code и подхватить её
-- `hive-mind_broadcast` отправляет сообщение **агентам внутри одного роя** — не в Claude Code другого разработчика
+- `agent_spawn` creates an agent **inside** the ruflo server or the current Claude Code session — not on another machine
+- `claims_handoff` passes task **metadata** — Boris has to start Claude Code himself and pick it up
+- `hive-mind_broadcast` sends a message **to agents within a single swarm** — not to another developer's Claude Code
 
-**Что работает:**
+**What works:**
 
-| Сценарий | Возможно? | Как |
+| Scenario | Possible? | How |
 |----------|-----------|-----|
-| Назначить задачу другому разработчику | Да | `claims_claim` / `claims_handoff` |
-| Отправить сообщение всем агентам | Да | `hive-mind_broadcast` |
-| Общая память между всеми | Да | `memory_store` / `hive-mind_memory` |
-| Запустить код на чужой машине | Нет | — |
-| Запустить агента на общем сервере | Возможно | Headless Claude Code на сервере |
-| Запустить агента в CI | Да | Через webhook → GitHub Actions |
-| Ruflo workers | Да, но локально | Фоновые аналитические задачи внутри ruflo |
+| Assign a task to another developer | Yes | `claims_claim` / `claims_handoff` |
+| Send a message to all agents | Yes | `hive-mind_broadcast` |
+| Shared memory between everyone | Yes | `memory_store` / `hive-mind_memory` |
+| Run code on another machine | No | — |
+| Run an agent on a shared server | Possible | Headless Claude Code on the server |
+| Run an agent in CI | Yes | Via webhook → GitHub Actions |
+| Ruflo workers | Yes, but locally | Background analytical tasks inside ruflo |
 
-**Варианты для удалённого выполнения задач:**
+**Options for remote task execution:**
 
-**Вариант A: Headless Claude Code на общем сервере**
+**Option A: Headless Claude Code on a shared server**
 
 ```
-Общий сервер
+Shared server
 ├── Ruflo MCP Server
-├── Claude Code (headless, демон)  ← выполняет задачи
-├── Git-репозитории (клоны)
-└── Доступ к коду есть локально
+├── Claude Code (headless, daemon)  ← executes tasks
+├── Git repositories (clones)
+└── Code is available locally
 
-Разработчик → назначает задачу → сервер выполняет
+Developer → assigns a task → server executes it
 ```
 
-Все агенты работают на одной машине с кодом. Разработчики отправляют задачи на сервер, а не запускают что-то друг у друга.
+All agents run on a single machine with the code. Developers submit tasks to the server rather than launching something on each other's machines.
 
-**Вариант B: CI/CD пайплайн как исполнитель**
+**Option B: CI/CD pipeline as the executor**
 
 ```
-Разработчик → создаёт задачу в ruflo → webhook → GitHub Actions / CI →
-→ запускает Claude Code в контейнере → результат обратно в ruflo
+Developer → creates a task in ruflo → webhook → GitHub Actions / CI →
+→ runs Claude Code in a container → result back into ruflo
 ```
 
-### Ruflo Background Workers (не путать с удалённым запуском)
+### Ruflo Background Workers (not to be confused with remote launching)
 
-Ruflo имеет **12 встроенных фоновых воркеров** — это локальные аналитические задачи внутри ruflo-процесса, а не механизм удалённого запуска Claude Code на другой машине.
+Ruflo has **12 built-in background workers** — these are local analytical tasks inside the ruflo process, not a mechanism for remotely launching Claude Code on another machine.
 
 ```bash
 # CLI
 npx ruflo worker dispatch --trigger audit --context "./src"
 npx ruflo worker status
 
-# Промпты для Claude Code
-> Запусти ruflo аудит безопасности для ./app/Servlets/
+# Prompts for Claude Code
+> Run a ruflo security audit for ./app/Servlets/
 ```
 
-| Trigger | Что делает | Время |
+| Trigger | What it does | Time |
 |---------|-----------|-------|
-| `ultralearn` | Глубокое изучение и синтез знаний | ~60s |
-| `optimize` | Профилирование и оптимизация | ~30s |
-| `consolidate` | Очистка и дедупликация памяти | ~20s |
-| `predict` | Предиктивный прелоад и кеширование | ~15s |
-| `audit` | Сканирование уязвимостей | ~45s |
-| `map` | Маппинг архитектуры кодовой базы | ~30s |
-| `preload` | Прогрев кеша | ~10s |
-| `deepdive` | Глубокий анализ кода | ~60s |
-| `document` | Автогенерация документации | ~45s |
-| `refactor` | Предложения по рефакторингу | ~30s |
-| `benchmark` | Бенчмарки производительности | ~60s |
-| `testgaps` | Анализ покрытия тестами | ~30s |
+| `ultralearn` | Deep study and synthesis of knowledge | ~60s |
+| `optimize` | Profiling and optimization | ~30s |
+| `consolidate` | Memory cleanup and deduplication | ~20s |
+| `predict` | Predictive preload and caching | ~15s |
+| `audit` | Vulnerability scanning | ~45s |
+| `map` | Mapping codebase architecture | ~30s |
+| `preload` | Warming up the cache | ~10s |
+| `deepdive` | Deep code analysis | ~60s |
+| `document` | Autogenerating documentation | ~45s |
+| `refactor` | Refactoring suggestions | ~30s |
+| `benchmark` | Performance benchmarks | ~60s |
+| `testgaps` | Test coverage analysis | ~30s |
 
-Workers работают **внутри ruflo-процесса** — это не LLM-вызовы и не Claude Code сессии. Полезны для автоматизации рутинных проверок, но не заменяют удалённый запуск агентов.
+Workers run **inside the ruflo process** — they are not LLM calls and not Claude Code sessions. Useful for automating routine checks, but do not replace remote launching of agents.
 
-### Что учесть при развёртывании
+### What to consider when deploying
 
-| Риск | Митигация |
+| Risk | Mitigation |
 |------|-----------|
-| Секреты в памяти | Вызывать `aidefence_has_pii` перед `memory_store` для проверки на PII (email, ключи, токены). Автоматической защиты нет — это ручная проверка. Namespace не ограничивает доступ, любой клиент может читать любой namespace |
-| Сетевые задержки | Эмбеддинг-генерация (ONNX) на сервере. Для удалёнщиков — VPN |
-| Размер базы | temporal decay (30 дней), TTL, периодический `memory_stats` и `memory cleanup` |
-| Администрирование | Назначить ответственного за namespace-структуру и очистку устаревших паттернов |
-| Бекапы | `npx ruflo ruvector backup --output ./backup.sql` или стандартный `pg_dump`. Встроенного планировщика нет — настроить через cron |
+| Secrets in memory | Call `aidefence_has_pii` before `memory_store` to check for PII (email, keys, tokens). There is no automatic protection — this is a manual check. Namespace does not restrict access, any client can read any namespace |
+| Network latency | Embedding generation (ONNX) happens on the server. For remote workers — VPN |
+| Database size | temporal decay (30 days), TTL, periodic `memory_stats` and `memory cleanup` |
+| Administration | Designate someone responsible for the namespace structure and cleanup of stale patterns |
+| Backups | `npx ruflo ruvector backup --output ./backup.sql` or standard `pg_dump`. There is no built-in scheduler — set up via cron |
 
-## Ограничения stdio-режима (ВАЖНО)
+## stdio mode limitations (IMPORTANT)
 
-> **Критическое ограничение:** В stdio-режиме каждый **проект** получает свой процесс ruflo. Больше половины функционала ruflo хранит состояние **в оперативной памяти процесса** и не расшаривается между проектами.
+> **Critical limitation:** In stdio mode, each **project** gets its own ruflo process. More than half of ruflo's functionality stores state **in the process's memory** and is not shared between projects.
 >
-> **Нюанс:** Внутри одного проекта Claude Code **переиспользует** один процесс ruflo для всех сессий (`claude /new`, новый терминал). Поэтому claims, tasks, hive-mind **видны** между сессиями одного проекта, но **не видны** из другого проекта. (Проверено экспериментально, 2026-04-16.)
+> **Nuance:** Within a single project, Claude Code **reuses** one ruflo process for all sessions (`claude /new`, a new terminal). So claims, tasks, and hive-mind **are visible** between sessions of one project, but **not visible** from another project. (Verified experimentally, 2026-04-16.)
 
-### Что расшаривается (SQLite → `.swarm/memory.db`)
+### What is shared (SQLite → `.swarm/memory.db`)
 
-| Подсистема | Инструменты |
+| Subsystem | Tools |
 |---|---|
-| Память | `memory_store`, `memory_search`, `memory_search_unified` |
-| Паттерны | `hooks_intelligence_pattern-store`, `hooks_intelligence_pattern-search` |
-| Траектории | `hooks_intelligence_trajectory-*` |
-| Сессии | `session_save`, `session_restore` |
-| Эмбеддинги | `embeddings_generate`, `embeddings_search` |
+| Memory | `memory_store`, `memory_search`, `memory_search_unified` |
+| Patterns | `hooks_intelligence_pattern-store`, `hooks_intelligence_pattern-search` |
+| Trajectories | `hooks_intelligence_trajectory-*` |
+| Sessions | `session_save`, `session_restore` |
+| Embeddings | `embeddings_generate`, `embeddings_search` |
 
-Расшаривание работает благодаря обёртке с фиксированным `cwd` → единый файл `~/.ruflo-personal/.swarm/memory.db` (см. секцию «Личный ruflo: общая память между проектами»).
+Sharing works thanks to a wrapper with a fixed `cwd` → a single file `~/.ruflo-personal/.swarm/memory.db` (see the section "Personal ruflo: shared memory between projects").
 
-### Что НЕ расшаривается между проектами (in-memory → привязано к процессу)
+### What is NOT shared between projects (in-memory → tied to the process)
 
-| Подсистема | Инструменты | Что теряется |
+| Subsystem | Tools | What is lost |
 |---|---|---|
-| **Claims** | `claims_claim`, `claims_board`, `claims_handoff`... | Доска задач, захваты, передачи |
-| **Tasks** | `task_create`, `task_assign`, `task_list`... | Трекер задач и назначения |
-| **Hive-Mind** | `hive-mind_init`, `hive-mind_broadcast`, `hive-mind_memory`... | Общая память роя, оповещения |
-| **Agents** | `agent_spawn`, `agent_pool`, `agent_list`... | Запущенные агенты и их состояние |
-| **Coordination** | `coordination_sync`, `coordination_consensus`... | Топология, балансировка |
-| **Swarm** | `swarm_init`, `swarm_status`... | Рой и его конфигурация |
-| **Workflows** | `workflow_create`, `workflow_execute`... | Шаблоны и состояние выполнения |
-| **Autopilot** | `autopilot_enable`, `autopilot_predict`... | Модель предсказаний |
-| **Neural** | `neural_train`, `neural_predict`... | Обученные модели |
+| **Claims** | `claims_claim`, `claims_board`, `claims_handoff`... | Task board, claims, handoffs |
+| **Tasks** | `task_create`, `task_assign`, `task_list`... | Task tracker and assignments |
+| **Hive-Mind** | `hive-mind_init`, `hive-mind_broadcast`, `hive-mind_memory`... | Shared swarm memory, notifications |
+| **Agents** | `agent_spawn`, `agent_pool`, `agent_list`... | Running agents and their state |
+| **Coordination** | `coordination_sync`, `coordination_consensus`... | Topology, load balancing |
+| **Swarm** | `swarm_init`, `swarm_status`... | Swarm and its configuration |
+| **Workflows** | `workflow_create`, `workflow_execute`... | Templates and execution state |
+| **Autopilot** | `autopilot_enable`, `autopilot_predict`... | Prediction model |
+| **Neural** | `neural_train`, `neural_predict`... | Trained models |
 
-### Сводка: что где видно
+### Summary: what is visible where
 
-| Подсистема | Сессии одного проекта | Между проектами (stdio) | ruflo-hub |
+| Subsystem | Sessions of one project | Between projects (stdio) | ruflo-hub |
 |---|---|---|---|
-| Memory, паттерны, эмбеддинги | ✓ (общий `.swarm/`) | ✓ (общий `.swarm/`) | ✓ |
-| Claims, tasks, hive-mind | ✓ (общий процесс) | **✗** (разные процессы) | ✓ |
-| Agents, coordination, swarm | ✓ (общий процесс) | **✗** | ✓ |
-| Перезапуск процесса (`/mcp`) | In-memory теряется | In-memory теряется | In-memory теряется |
+| Memory, patterns, embeddings | ✓ (shared `.swarm/`) | ✓ (shared `.swarm/`) | ✓ |
+| Claims, tasks, hive-mind | ✓ (shared process) | **✗** (different processes) | ✓ |
+| Agents, coordination, swarm | ✓ (shared process) | **✗** | ✓ |
+| Process restart (`/mcp`) | In-memory is lost | In-memory is lost | In-memory is lost |
 
-### Решение для мультипроектной работы: ruflo-hub
+### Solution for multi-project work: ruflo-hub
 
-Чтобы claims, tasks, hive-mind работали **между проектами**, нужен **один постоянно работающий процесс ruflo**, обёрнутый в HTTP. Готовое решение — [ruflo-hub](https://github.com/jazz-max/ruflo-hub):
+For claims, tasks, and hive-mind to work **between projects**, you need **a single continuously running ruflo process** wrapped in HTTP. The ready-made solution is [ruflo-hub](https://github.com/jazz-max/ruflo-hub):
 
 ```bash
 git clone https://github.com/jazz-max/ruflo-hub.git
@@ -917,36 +917,36 @@ docker compose up -d
 ```
 
 ```
-Проект A ──HTTP──┐
-Проект B ──HTTP──┤── ruflo-hub (один процесс) ── .swarm/memory.db
-Проект C ──HTTP──┘        ↑
-                    всё in-memory состояние
-                    живёт в одном процессе
-                    и видно всем проектам
+Project A ──HTTP──┐
+Project B ──HTTP──┤── ruflo-hub (single process) ── .swarm/memory.db
+Project C ──HTTP──┘        ↑
+                    all in-memory state
+                    lives in one process
+                    and is visible to all projects
 ```
 
-### Обходной путь: задачи через memory
+### Workaround: tasks via memory
 
-Без ruflo-hub для передачи задач между проектами можно использовать `memory_store` / `memory_search` с namespace `tasks` — они пишут в общий `memory.db` и видны отовсюду.
+Without ruflo-hub, to pass tasks between projects you can use `memory_store` / `memory_search` with the namespace `tasks` — they write into a shared `memory.db` and are visible from anywhere.
 
 ```
-# Проект A: поставить задачу
-> Сохрани в ruflo-personal namespace tasks ключ fix-auth-redirect:
-> Статус: open. Исправить редирект после логина. Теги: bug, auth, open
+# Project A: create a task
+> Save in ruflo-personal namespace tasks the key fix-auth-redirect:
+> Status: open. Fix the redirect after login. Tags: bug, auth, open
 
-# Проект B: найти задачи
-> Покажи записи в ruflo-personal namespace tasks
+# Project B: find tasks
+> Show entries in ruflo-personal namespace tasks
 
-# Проект B: закрыть задачу (upsert)
-> Обнови в ruflo-personal ключ fix-auth-redirect в namespace tasks:
-> Статус: done, выполнено 2026-04-16
+# Project B: close the task (upsert)
+> Update in ruflo-personal the key fix-auth-redirect in namespace tasks:
+> Status: done, completed 2026-04-16
 ```
 
-## Личный ruflo: общая память между проектами (stdio)
+## Personal ruflo: shared memory between projects (stdio)
 
-### Проблема
+### Problem
 
-При настройке `ruflo-personal` как stdio MCP на user level (`~/.claude.json`):
+When setting up `ruflo-personal` as an stdio MCP at the user level (`~/.claude.json`):
 
 ```json
 "ruflo-personal": {
@@ -956,14 +956,14 @@ docker compose up -d
 }
 ```
 
-Каждый Claude Code запускает **свой процесс** ruflo с `cwd` текущего проекта. Memory-bridge (`@claude-flow/cli/dist/src/memory/memory-bridge.js`) жёстко использует `process.cwd()`:
+Each Claude Code launches **its own** ruflo process with the `cwd` of the current project. The memory bridge (`@claude-flow/cli/dist/src/memory/memory-bridge.js`) hard-codes the use of `process.cwd()`:
 
 ```js
 function getDbPath(customPath) {
     const swarmDir = path.resolve(process.cwd(), '.swarm');
     if (!customPath)
         return path.join(swarmDir, 'memory.db');
-    // Path traversal protection — путь за пределами cwd игнорируется
+    // Path traversal protection — a path outside cwd is ignored
     const cwd = process.cwd();
     if (!resolved.startsWith(cwd)) {
         return path.join(swarmDir, 'memory.db'); // fallback
@@ -971,17 +971,17 @@ function getDbPath(customPath) {
 }
 ```
 
-**Результат:** из проекта Alpha сохраняешь 198 записей, из проекта Beta — 0. Разные `.swarm/memory.db` в каждом проекте.
+**Result:** from project Alpha you save 198 records, from project Beta — 0. Different `.swarm/memory.db` in each project.
 
-### Почему env-переменные не помогают
+### Why env variables don't help
 
-`CLAUDE_FLOW_MEMORY_PATH` и `CLAUDE_FLOW_DATA_DIR` документированы в README ruflo, но **memory-bridge их не читает**. Они используются только в шаблонах документации (`claudemd-generator.js`) и в описании memory-specialist агента, но не в реальном коде MCP-сервера.
+`CLAUDE_FLOW_MEMORY_PATH` and `CLAUDE_FLOW_DATA_DIR` are documented in the ruflo README, but **memory-bridge does not read them**. They are used only in documentation templates (`claudemd-generator.js`) and in the description of the memory-specialist agent, but not in the actual MCP server code.
 
-### Решение: обёртка с фиксированным cwd
+### Solution: a wrapper with a fixed cwd
 
-Создать скрипт-обёртку, который делает `cd` в общую папку перед запуском ruflo:
+Create a wrapper script that does `cd` into a shared folder before starting ruflo:
 
-**1. Создать папку и скрипт:**
+**1. Create the folder and script:**
 
 ```bash
 mkdir -p ~/.ruflo-personal
@@ -995,7 +995,7 @@ EOF
 chmod +x ~/.ruflo-personal/start.sh
 ```
 
-**2. Обновить `~/.claude.json`:**
+**2. Update `~/.claude.json`:**
 
 ```json
 "ruflo-personal": {
@@ -1006,181 +1006,181 @@ chmod +x ~/.ruflo-personal/start.sh
 }
 ```
 
-> **Важно:** В `args` нужен **абсолютный путь** (`/Users/<username>/...`), а не `~/.ruflo-personal/...`. Тильда `~` — это shell expansion, она раскрывается только при парсинге командной строки оболочкой. Claude Code запускает MCP-серверы через `spawn()`, передавая аргументы напрямую процессу без shell-обработки. Bash получит литеральную строку `~/.ruflo-personal/start.sh` и не найдёт такой файл.
+> **Important:** `args` needs an **absolute path** (`/Users/<username>/...`), not `~/.ruflo-personal/...`. The tilde `~` is a shell expansion, it is expanded only when the shell parses the command line. Claude Code launches MCP servers via `spawn()`, passing arguments directly to the process without shell processing. Bash will receive the literal string `~/.ruflo-personal/start.sh` and will not find such a file.
 
-**3. Перенести существующие данные (если есть):**
+**3. Migrate existing data (if any):**
 
 ```bash
-# Скопировать .swarm из проекта, где уже были записи
+# Copy .swarm from the project where records already existed
 cp -r /path/to/project/.swarm ~/.ruflo-personal/
 ```
 
-Теперь **все** Claude Code сессии (из любого проекта) будут использовать единую базу `~/.ruflo-personal/.swarm/memory.db`.
+Now **all** Claude Code sessions (from any project) will use the single database `~/.ruflo-personal/.swarm/memory.db`.
 
-### Альтернативные варианты
+### Alternatives
 
-| Вариант | Плюсы | Минусы |
+| Option | Pros | Cons |
 |---------|-------|--------|
-| **Обёртка с cd** (рекомендуемый) | Одно изменение в ~/.claude.json, не трогает проекты | Нет |
-| **Symlink .swarm/** в каждом проекте | Работает без изменения конфига | Нужно добавлять symlink в каждый новый проект |
-| **SSE-сервер** из фиксированной директории | Самый «правильный» | Нужен постоянно работающий процесс |
+| **Wrapper with cd** (recommended) | One change in ~/.claude.json, doesn't touch projects | None |
+| **Symlink .swarm/** in each project | Works without changing the config | Need to add the symlink in each new project |
+| **SSE server** from a fixed directory | The most "proper" one | Requires a continuously running process |
 
-## Гибридная схема: личный ruflo + командные серверы
+## Hybrid scheme: personal ruflo + team servers
 
-Типичная ситуация: один разработчик участвует в нескольких проектах с разными командами, плюс имеет собственные проекты. Решение — несколько инстансов ruflo с разными скоупами.
+Typical situation: a single developer participates in several projects with different teams, plus has personal projects. The solution is several ruflo instances with different scopes.
 
-### Архитектура
+### Architecture
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│  Командный сервер A (проект Alpha)                    │
-│  ruflo-hub --port 3001                             │
-│  Пользователи: вы + команда проекта Alpha             │
+│  Team server A (project Alpha)                        │
+│  ruflo-hub --port 3001                                │
+│  Users: you + the Alpha project team                  │
 └──────────────────────────┬────────────────────────────┘
                            │
 ┌──────────────────────────┼────────────────────────────┐
-│  Командный сервер B (проект Beta)                     │
-│  ruflo-hub --port 3002                             │
-│  Пользователи: вы + команда проекта Beta              │
+│  Team server B (project Beta)                         │
+│  ruflo-hub --port 3002                                │
+│  Users: you + the Beta project team                   │
 └──────────────────────────┼────────────────────────────┘
                            │
 ┌──────────────────────────┼────────────────────────────┐
-│  Личный ruflo (stdio или ruflo-hub)                │
-│  Импорт памяти из всех проектов                       │
-│  Только для вас, доступен в любом проекте             │
-│  stdio: memory расшаривается, claims — нет            │
-│  ruflo-hub: всё расшаривается между проектами      │
+│  Personal ruflo (stdio or ruflo-hub)                  │
+│  Memory import from all projects                      │
+│  Only for you, available in any project               │
+│  stdio: memory is shared, claims — not                │
+│  ruflo-hub: everything is shared between projects     │
 └──────────────────────────┴────────────────────────────┘
 ```
 
-### Конфигурация Claude Code
+### Claude Code configuration
 
-**1. Личный ruflo — глобально** (user scope):
+**1. Personal ruflo — globally** (user scope):
 
-Доступен во всех проектах, аккумулирует личный опыт.
+Available in all projects, accumulates personal experience.
 
-**Вариант A: stdio (простой, memory расшаривается, claims — нет)**
+**Option A: stdio (simple, memory is shared, claims — not)**
 
 ```bash
-# Добавить (с обёрткой для общей базы, см. секцию «Личный ruflo: общая память»)
+# Add (with a wrapper for the shared database, see the "Personal ruflo: shared memory" section)
 claude mcp add ruflo-personal -s user -- bash /Users/<username>/.ruflo-personal/start.sh
 
-# Проверить
+# Check
 claude mcp get ruflo-personal
 
-# Удалить
+# Remove
 claude mcp remove ruflo-personal -s user
 ```
 
-**Вариант B: ruflo-hub (всё расшаривается между проектами)**
+**Option B: ruflo-hub (everything is shared between projects)**
 
 ```bash
-# Поднять личный ruflo-hub (Docker)
+# Bring up a personal ruflo-hub (Docker)
 git clone https://github.com/jazz-max/ruflo-hub.git ~/ruflo-personal-server
 cd ~/ruflo-personal-server && cp .env.example .env
 docker compose up -d
 
-# Добавить в Claude Code
+# Add to Claude Code
 claude mcp add ruflo-personal -s user --transport http --url http://localhost:3000/mcp
 
-# Или через ~/.claude.json:
+# Or via ~/.claude.json:
 # "ruflo-personal": {
 #   "type": "http",
 #   "url": "http://localhost:3000/mcp"
 # }
 ```
 
-> В варианте B claims, tasks, hive-mind работают между всеми проектами и сессиями. Минус — нужен запущенный Docker-контейнер.
+> In Option B, claims, tasks, and hive-mind work between all projects and sessions. The downside is that a running Docker container is required.
 
-**2. Командный ruflo — на уровне проекта** (project scope):
+**2. Team ruflo — at the project level** (project scope):
 
-Коммитится в git — каждый член команды автоматически получает доступ.
+Committed into git — each team member automatically gets access.
 
 ```bash
-# В каталоге проекта Alpha
+# In the Alpha project directory
 claude mcp add ruflo-team -s project --transport http --url http://server-alpha:3001/mcp
 
-# В каталоге проекта Beta
+# In the Beta project directory
 claude mcp add ruflo-team -s project --transport http --url http://server-beta:3002/mcp
 ```
 
-> Имя `ruflo-team` одинаковое в обоих проектах — для разработчика интерфейс единообразный, а URL разный.
+> The name `ruflo-team` is the same in both projects — for the developer the interface is uniform, while the URL differs.
 
-### Что видит Claude Code в каждом проекте
+### What Claude Code sees in each project
 
-| Контекст | MCP-серверы | Источник настроек |
+| Context | MCP servers | Source of settings |
 |----------|-------------|-------------------|
-| Проект Alpha | `ruflo-personal` + `ruflo-team` (→ server-alpha) | global + project |
-| Проект Beta | `ruflo-personal` + `ruflo-team` (→ server-beta) | global + project |
-| Личный проект | `ruflo-personal` | только global |
+| Project Alpha | `ruflo-personal` + `ruflo-team` (→ server-alpha) | global + project |
+| Project Beta | `ruflo-personal` + `ruflo-team` (→ server-beta) | global + project |
+| Personal project | `ruflo-personal` | only global |
 
-### Промпты в контексте нескольких ruflo
-
-```
-# В проекте Alpha — Claude видит оба сервера
-> Сохрани в ruflo-team: решение проблемы с кодировкой...
-
-> Поищи в ruflo-personal: как мы решали кодировку в других проектах?
-
-# В проекте Beta — Claude видит другую пару
-> Сохрани в ruflo-team: nginx конфиг для проксирования...
-
-> Поищи в ruflo-personal: были ли похожие nginx настройки?
-
-# В личном проекте — только personal
-> Поищи в ruflo-personal: паттерны авторизации из всех проектов
-```
-
-### Первоначальное наполнение личного ruflo
+### Prompts in the context of multiple ruflos
 
 ```
-# Импортировать память из всех проектов Claude Code
-> Импортируй в ruflo-personal память из всех проектов
+# In project Alpha — Claude sees both servers
+> Save to ruflo-team: solution to the encoding problem...
 
-# Claude выполнит:
+> Search ruflo-personal: how did we solve encoding in other projects?
+
+# In project Beta — Claude sees a different pair
+> Save to ruflo-team: nginx config for proxying...
+
+> Search ruflo-personal: were there similar nginx settings?
+
+# In the personal project — only personal
+> Search ruflo-personal: authorization patterns across all projects
+```
+
+### Initial seeding of personal ruflo
+
+```
+# Import memory from all Claude Code projects
+> Import memory from all projects into ruflo-personal
+
+# Claude will execute:
 memory_import_claude(allProjects: true)
-# → все файлы памяти → эмбеддинги → семантический поиск по всем проектам
+# → all memory files → embeddings → semantic search across all projects
 ```
 
-Личный ruflo становится **мостом между проектами** — туда стекается опыт из всех, а командные ruflo изолированы друг от друга.
+Personal ruflo becomes a **bridge between projects** — experience from all of them flows into it, while team ruflos are isolated from each other.
 
-### Потоки знаний
+### Knowledge flows
 
 ```
-Проект Alpha ──→ ruflo-team-alpha ──→ команда Alpha
+Project Alpha ──→ ruflo-team-alpha ──→ Alpha team
      │
      └──→ ruflo-personal ←──────┐
                                 │
-Проект Beta  ──→ ruflo-team-beta ──→ команда Beta
+Project Beta  ──→ ruflo-team-beta ──→ Beta team
      │                          │
      └──→ ruflo-personal ←──────┘
                   │
-Личные проекты ───┘
+Personal projects─┘
 
-ruflo-personal = ваш личный "мозг" со знаниями из всех проектов
-ruflo-team-*   = командная память, изолированная по проектам
+ruflo-personal = your personal "brain" with knowledge from all projects
+ruflo-team-*   = team memory, isolated per project
 ```
 
-## Рекомендуемый подход
+## Recommended approach
 
-### Для одного разработчика
+### For a single developer
 
-1. **Ruflo через обёртку** (stdio + фиксированный cwd) в `~/.claude.json` — общая база для всех проектов (см. секцию «Личный ruflo: общая память между проектами»)
-2. **`memory_import_claude(allProjects: true)`** — объединить память всех проектов
-3. **Namespace по проектам** — `project:{name}` для организации
+1. **Ruflo via a wrapper** (stdio + fixed cwd) in `~/.claude.json` — a shared database for all projects (see the "Personal ruflo: shared memory between projects" section)
+2. **`memory_import_claude(allProjects: true)`** — combine memory from all projects
+3. **Namespace per project** — `project:{name}` for organization
 
-### Для команды (один проект)
+### For a team (one project)
 
-1. **Ruflo MCP-сервер** с HTTP-транспортом на выделенной машине с PostgreSQL (RuVector)
-2. **`.claude/settings.json` в репозитории** — все члены команды автоматически подключены
-3. **`CLAUDE.md`** — источник истины для правил проекта (общий через git)
-4. **Namespace-конвенция** — `dev:`, `project:`, `team:`, `shared`
+1. **Ruflo MCP server** with HTTP transport on a dedicated machine with PostgreSQL (RuVector)
+2. **`.claude/settings.json` in the repository** — all team members are automatically connected
+3. **`CLAUDE.md`** — source of truth for project rules (shared via git)
+4. **Namespace convention** — `dev:`, `project:`, `team:`, `shared`
 
-### Для нескольких команд и проектов
+### For multiple teams and projects
 
-1. **Личный ruflo** глобально — мост между проектами, накопление опыта
-2. **Командный ruflo** в каждом проекте — изолированная командная память
-3. **Единое имя** `ruflo-team` в `.claude/settings.json` проектов — единообразный интерфейс
-4. **Git** — основной способ обмена кодом и документацией
+1. **Personal ruflo** globally — a bridge between projects, accumulating experience
+2. **Team ruflo** in each project — isolated team memory
+3. **A single name** `ruflo-team` in the projects' `.claude/settings.json` — a uniform interface
+4. **Git** — the primary way to exchange code and documentation
 
-Ruflo усиливает индивидуальную продуктивность и обеспечивает командную память, а код и документация живут в git.
+Ruflo amplifies individual productivity and provides team memory, while code and documentation live in git.

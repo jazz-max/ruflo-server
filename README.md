@@ -1,56 +1,58 @@
 # Ruflo Hub — Docker
 
-Центральный MCP-хаб для команды: HTTP-обёртка над Ruflo CLI (250+ инструментов), shared memory между сессиями Claude Code, statusline с remote-данными. Активная память — локальный sql.js; PostgreSQL (pgvector) — **опциональный** бэкап для `ruflo ruvector import/export`.
+A central MCP hub for your team: an HTTP wrapper around the Ruflo CLI (250+ tools), shared memory between Claude Code sessions, and a statusline backed by remote data. Active memory is local sql.js; PostgreSQL (pgvector) is an **optional** backup for `ruflo ruvector import/export`.
 
-> **Гайды:**
-> - [Use cases](docs/use-cases.md) — сценарии для личного/командного/мульти-командного использования, перенос паттернов между инстансами
-> - [Ruflo usage guide](docs/ruflo-usage-guide.md) — практическая выжимка из официального README: что делают хуки, какие MCP-tools реально нужны, skills, 3-tier routing
-> - [Swarm management](docs/swarm-management.md) — управление роями: концепция, lifecycle, квирки ruflo@3.5.x
-> - [Мультипроектная работа с ruflo](docs/ruflo-multiproject-guide.md) — передача знаний, координация задач, claims, hive-mind
+> 🇷🇺 Russian version: [docs/ru/README.md](docs/ru/README.md)
+
+> **Guides:**
+> - [Use cases](docs/use-cases.md) — scenarios for personal / team / multi-team use, pattern transfer between instances
+> - [Ruflo usage guide](docs/ruflo-usage-guide.md) — practical distillation of the official README: what hooks do, which MCP tools you actually need, skills, 3-tier routing
+> - [Swarm management](docs/swarm-management.md) — swarm operations: concept, lifecycle, ruflo@3.5.x quirks
+> - [Multi-project work with ruflo](docs/ruflo-multiproject-guide.md) — knowledge transfer, task coordination, claims, hive-mind
 
 ```
-Ruflo MCP (stdio) → Express proxy (Streamable HTTP) → порт 3000
+Ruflo MCP (stdio) → Express proxy (Streamable HTTP) → port 3000
                           ↕
-                    sql.js (/app/.swarm/memory.db)  ← активная память
-                          ↕ (опционально, ручные команды)
-                    PostgreSQL + pgvector (RuVector)  ← архив/бридж
+                    sql.js (/app/.swarm/memory.db)  ← active memory
+                          ↕ (optional, manual commands)
+                    PostgreSQL + pgvector (RuVector)  ← archive/bridge
 ```
 
-## Быстрый старт
+## Quick start
 
-### С PostgreSQL (полный режим)
+### With PostgreSQL (full mode)
 
 ```bash
 cp .env.example .env
-# Отредактировать .env — сменить POSTGRES_PASSWORD
+# Edit .env — change POSTGRES_PASSWORD
 docker compose up -d
 ```
 
-В `.env` должна быть строка `COMPOSE_PROFILES=pg` (есть в `.env.example` по умолчанию) — она включает сервис `ruflo-db`.
+`.env` must contain the line `COMPOSE_PROFILES=pg` (it's in `.env.example` by default) — this enables the `ruflo-db` service.
 
-### Lean-режим (без PostgreSQL)
+### Lean mode (without PostgreSQL)
 
 ```bash
 cp .env.example .env
-# Закомментировать или удалить строку COMPOSE_PROFILES=pg
+# Comment out or remove the COMPOSE_PROFILES=pg line
 docker compose up -d
 ```
 
-Поднимутся только ruflo-сервисы. Память будет храниться в sql.js (`/app/.swarm/memory.db`), persistent через volume. Минус: недоступны команды `ruflo ruvector import/export` — для переноса паттернов между инстансами см. альтернативы в [docs/use-cases.md](docs/use-cases.md).
+Only the ruflo services will start. Memory will be stored in sql.js (`/app/.swarm/memory.db`), persistent via a volume. Downside: `ruflo ruvector import/export` commands are unavailable — for transferring patterns between instances see alternatives in [docs/use-cases.md](docs/use-cases.md).
 
-Сервер: `http://localhost:3000/mcp`
+Server: `http://localhost:3000/mcp`
 
-## Встраивание как сервис
+## Embedding as a service
 
-Образ `jazzmax/ruflo-hub` можно добавить в любой существующий `docker-compose.yml`.
+The `jazzmax/ruflo-hub` image can be added to any existing `docker-compose.yml`.
 
-### Вариант A: со своим PostgreSQL (pgvector)
+### Variant A: with your own PostgreSQL (pgvector)
 
-Если в проекте ещё нет PostgreSQL с pgvector:
+If your project doesn't yet have PostgreSQL with pgvector:
 
 ```yaml
 services:
-  # ... ваши сервисы ...
+  # ... your services ...
 
   ruflo:
     image: jazzmax/ruflo-hub:latest
@@ -87,13 +89,13 @@ volumes:
   ruflo-pgdata:
 ```
 
-### Вариант B: подключиться к существующему PostgreSQL
+### Variant B: connect to an existing PostgreSQL
 
-Если PostgreSQL (с pgvector) уже есть в проекте:
+If PostgreSQL (with pgvector) already exists in the project:
 
 ```yaml
 services:
-  # ... ваш существующий postgres ...
+  # ... your existing postgres ...
   # postgres:
   #   image: pgvector/pgvector:pg17
   #   ...
@@ -105,9 +107,9 @@ services:
       - "3000:3000"
     environment:
       RUFLO_PORT: 3000
-      POSTGRES_HOST: postgres        # имя вашего сервиса с PostgreSQL
+      POSTGRES_HOST: postgres        # name of your PostgreSQL service
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ruflo             # отдельная БД для ruflo
+      POSTGRES_DB: ruflo             # a separate database for ruflo
       POSTGRES_USER: ruflo
       POSTGRES_PASSWORD: changeme
     depends_on:
@@ -115,10 +117,10 @@ services:
         condition: service_healthy
 ```
 
-> PostgreSQL должен иметь расширение pgvector. Образ `pgvector/pgvector:pg17` включает его.
-> Обычный `postgres:17` без pgvector — не подойдёт.
+> PostgreSQL must have the pgvector extension. The `pgvector/pgvector:pg17` image ships with it.
+> A plain `postgres:17` without pgvector will not work.
 
-### Вариант C: внешний PostgreSQL (не в Docker)
+### Variant C: external PostgreSQL (outside Docker)
 
 ```yaml
 services:
@@ -129,7 +131,7 @@ services:
       - "3000:3000"
     environment:
       RUFLO_PORT: 3000
-      POSTGRES_HOST: 192.168.1.100   # IP вашего сервера
+      POSTGRES_HOST: 192.168.1.100   # IP of your server
       POSTGRES_PORT: 5432
       POSTGRES_DB: ruflo
       POSTGRES_USER: ruflo
@@ -138,7 +140,7 @@ services:
 
 ### Healthcheck
 
-Образ имеет встроенный healthcheck. Другие сервисы могут зависеть от ruflo:
+The image has a built-in healthcheck. Other services can depend on ruflo:
 
 ```yaml
 services:
@@ -149,7 +151,7 @@ services:
         condition: service_healthy
 ```
 
-### Несколько команд — несколько инстансов
+### Multiple teams — multiple instances
 
 ```yaml
 services:
@@ -192,98 +194,98 @@ volumes:
   ruflo-pgdata:
 ```
 
-> При общем PostgreSQL каждый инстанс использует свою базу (`ruflo_alpha`, `ruflo_beta`). Базы создаются автоматически при первом запуске RuVector.
+> With a shared PostgreSQL, each instance uses its own database (`ruflo_alpha`, `ruflo_beta`). Databases are created automatically on the first RuVector startup.
 
-## Подключение клиентов
+## Connecting clients
 
-### Автоматическая настройка (рекомендуемый)
+### Automatic setup (recommended)
 
-Одна команда из корня проекта:
+A single command from the project root:
 
 ```bash
 curl "http://your-server:3000/setup?token=YOUR_TOKEN&name=ruflo-team" | bash
 ```
 
-Или с указанием пути к проекту:
+Or with an explicit project path:
 
 ```bash
 curl "http://your-server:3000/setup?token=YOUR_TOKEN&name=ruflo-team" | bash -s /path/to/project
 ```
 
-#### Параметры `/setup`
+#### `/setup` parameters
 
-| Параметр | По умолчанию | Описание |
-|----------|-------------|----------|
-| `token` | — | Bearer-токен авторизации (значение `MCP_AUTH_TOKEN` сервера) |
-| `name` | `ruflo` | Имя MCP-сервера в `.mcp.json` (определяет префикс инструментов: `mcp__<name>__*`) |
-| `skills` | `1` | Ставить bundle skills/agents/commands. `0` (`false`/`no`/`off`) — отключить |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `token` | — | Bearer token for authorization (the server's `MCP_AUTH_TOKEN` value) |
+| `name` | `ruflo` | MCP server name in `.mcp.json` (determines the tool prefix: `mcp__<name>__*`) |
+| `skills` | `1` | Install the skills/agents/commands bundle. `0` (`false`/`no`/`off`) disables it |
 
-#### Что делает скрипт
+#### What the script does
 
-1. Скачивает хуки с сервера (`auto-memory-hook.mjs`, `hook-handler.cjs`, `statusline.cjs`) в `.claude/helpers/`
-2. Скачивает и распаковывает bundle `skills` + `agents` + `commands` в `.claude/` (существующие файлы не перезаписываются — кастомизации сохраняются; отключается через `?skills=0`)
-3. Создаёт `.claude-flow/ruflo.json` с URL сервера и токеном (для моста памяти)
-4. Создаёт или дополняет `.mcp.json` с MCP-подключением и заголовком авторизации
-5. Создаёт `.claude/settings.json` с настройками хуков (если файл не существует)
-6. Проверяет связь с сервером
+1. Downloads hooks from the server (`auto-memory-hook.mjs`, `hook-handler.cjs`, `statusline.cjs`) into `.claude/helpers/`
+2. Downloads and unpacks the `skills` + `agents` + `commands` bundle into `.claude/` (existing files are not overwritten — customizations are preserved; disable with `?skills=0`)
+3. Creates `.claude-flow/ruflo.json` with the server URL and token (for the memory bridge)
+4. Creates or amends `.mcp.json` with the MCP connection and authorization header
+5. Creates `.claude/settings.json` with hook configuration (if the file doesn't already exist)
+6. Verifies connectivity to the server
 
-#### Примеры
+#### Examples
 
 ```bash
-# Минимальный (без авторизации, имя по умолчанию "ruflo")
+# Minimal (no auth, default name "ruflo")
 curl http://192.168.1.100:3000/setup | bash
 
-# С авторизацией
+# With authorization
 curl "http://192.168.1.100:3000/setup?token=572fd23e-ae2e-4e3b-9ea5-59e7a84c09a7" | bash
 
-# Кастомное имя для разных команд
+# Custom name per team
 curl "http://192.168.1.100:3001/setup?token=TOKEN_A&name=ruflo-alpha" | bash
 curl "http://192.168.1.100:3002/setup?token=TOKEN_B&name=ruflo-beta" | bash
 
-# Только MCP-мост, без skills/agents (совместимость со старым поведением)
+# MCP bridge only, no skills/agents (legacy behavior)
 curl "http://192.168.1.100:3000/setup?token=TOKEN&skills=0" | bash
 ```
 
-#### ⚠️ Сервер на той же машине — используй hostname, не IP
+#### ⚠️ Server on the same machine — use a hostname, not an IP
 
-Если ruflo-hub поднят **у тебя на буке/ноутбуке**, не привязывайся к IP — он меняется при переключении Wi-Fi/VPN. Используй mDNS-имя машины (macOS и большинство Linux поддерживают `.local` из коробки через Bonjour/Avahi):
+If ruflo-hub is running **on your laptop/desktop**, don't pin to an IP — it changes when you switch Wi-Fi/VPN. Use your machine's mDNS name (macOS and most Linux distros support `.local` out of the box via Bonjour/Avahi):
 
 ```bash
-# macOS/Linux — подстановка имени хоста
+# macOS/Linux — hostname substitution
 curl "http://$(hostname):3201/setup?token=TOKEN" | bash
 
-# Явно:
+# Explicit:
 curl "http://MacBook-Pro-3.local:3201/setup?token=TOKEN" | bash
 ```
 
-Это же правило применимо к `.claude-flow/ruflo.json` и `.mcp.json` — в них лучше хранить `http://MacBook-Pro-3.local:3201/mcp`, а не IP. Тогда клиент продолжит работать при любой смене сети.
+The same rule applies to `.claude-flow/ruflo.json` and `.mcp.json` — prefer storing `http://MacBook-Pro-3.local:3201/mcp` instead of an IP. Then the client keeps working across any network change.
 
-**Когда НЕ подходит `.local`:**
-- Клиенты вне локалки (VPN другой команды, удалённый сервер на VPS) — им `hostname.local` не зарезолвится. Там нужен публичный DNS (`ruflo.mycompany.com`) или туннель (Tailscale/Cloudflare Tunnel).
-- В компаниях с рестриктивной сетью — Bonjour/mDNS может быть выключен ИТ. Проверь через `ping $(hostname)` с клиентской машины.
+**When `.local` is NOT suitable:**
+- Clients outside the local network (another team's VPN, a remote VPS) — `hostname.local` won't resolve for them. You'll need public DNS (`ruflo.mycompany.com`) or a tunnel (Tailscale/Cloudflare Tunnel).
+- Corporate networks with restrictive policies — Bonjour/mDNS may be disabled by IT. Check with `ping $(hostname)` from a client machine.
 
-### Обновление bundle в уже настроенном проекте
+### Updating the bundle in an already-configured project
 
-Когда в hub появились новые skills/agents/commands (или они обновились в Docker-образе), можно обновить только bundle — без повторного запуска `/setup`, который перезапишет конфиги:
+When new skills/agents/commands appear in the hub (or they get updated in the Docker image), you can update only the bundle — without re-running `/setup`, which would overwrite your configs:
 
 ```bash
-# В текущей директории
+# Current directory
 curl http://your-server:3000/update-bundle | bash
 
-# С указанием пути к проекту
+# With an explicit project path
 curl http://your-server:3000/update-bundle | bash -s /path/to/project
 
-# С принудительной перезаписью существующих файлов
+# Force-overwrite existing files
 curl "http://your-server:3000/update-bundle?force=1" | bash
 ```
 
-По умолчанию `tar -xzkf` (флаг `-k`) не трогает существующие файлы — только добавляет недостающие. С `?force=1` — полная перезапись. В отличие от `/setup`, этот endpoint не создаёт `.claude-flow/ruflo.json`, `.mcp.json` и `settings.json` — чисто bundle.
+By default `tar -xzkf` (the `-k` flag) doesn't touch existing files — it only adds missing ones. With `?force=1` it's a full overwrite. Unlike `/setup`, this endpoint does not create `.claude-flow/ruflo.json`, `.mcp.json`, or `settings.json` — bundle only.
 
-Не забудь **перезапустить Claude Code** в проекте — skills грузятся на SessionStart.
+Don't forget to **restart Claude Code** in the project — skills load at SessionStart.
 
-### Ручное подключение MCP
+### Manual MCP connection
 
-Если нужно добавить только MCP без хуков и моста памяти:
+If you only need MCP without hooks or the memory bridge:
 
 **Claude Code CLI:**
 ```bash
@@ -307,52 +309,52 @@ claude mcp add --transport http \
 }
 ```
 
-> MCP-подключение даёт доступ к 250+ инструментам ruflo (memory, swarm, agents). Автоматическая настройка через `/setup` дополнительно добавляет **мост памяти** — синхронизацию паттернов между сессиями Claude Code.
+> An MCP connection gives you access to 250+ ruflo tools (memory, swarm, agents). Automatic setup via `/setup` additionally adds the **memory bridge** — pattern synchronization between Claude Code sessions.
 
-## API-эндпоинты
+## API endpoints
 
-| Метод | URL | Описание |
-|-------|-----|----------|
-| POST | `/mcp` | JSON-RPC прокси к ruflo MCP (основной эндпоинт) |
-| GET | `/health` | Статус сервера (`{"status":"ok","tools":257}`) |
-| GET | `/setup` | Shell-скрипт для автоматической настройки проекта |
-| GET | `/update-bundle` | Shell-скрипт для обновления только bundle (skills+agents+commands) |
-| GET | `/bundle.tar.gz` | Tar-gz архив bundle (используется `/setup` и `/update-bundle`) |
-| GET | `/templates` | Список доступных шаблонов |
-| GET | `/templates/:name` | Скачать конкретный шаблон |
+| Method | URL | Description |
+|--------|-----|-------------|
+| POST | `/mcp` | JSON-RPC proxy to ruflo MCP (main endpoint) |
+| GET | `/health` | Server status (`{"status":"ok","tools":257}`) |
+| GET | `/setup` | Shell script for automatic project setup |
+| GET | `/update-bundle` | Shell script for bundle-only updates (skills+agents+commands) |
+| GET | `/bundle.tar.gz` | Tar.gz archive of the bundle (used by `/setup` and `/update-bundle`) |
+| GET | `/templates` | List of available templates |
+| GET | `/templates/:name` | Download a specific template |
 
 ### POST /mcp — JSON-RPC
 
 ```bash
-# Вызов инструмента
+# Tool invocation
 curl -X POST http://your-server:3000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"memory_store","arguments":{"key":"my-pattern","value":"pattern content","namespace":"my-project"}},"id":1}'
 
-# Поиск в памяти
+# Memory search
 curl -X POST http://your-server:3000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"memory_search","arguments":{"query":"my search"}},"id":1}'
 
-# Список инструментов
+# List tools
 curl -X POST http://your-server:3000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
 ```
 
-### Аутентификация
+### Authentication
 
-Если задан `MCP_AUTH_TOKEN`, все запросы к `/mcp` требуют заголовок:
+If `MCP_AUTH_TOKEN` is set, all requests to `/mcp` require the header:
 
 ```
 Authorization: Bearer <token>
 ```
 
-Эндпоинты `/health`, `/setup`, `/update-bundle`, `/bundle.tar.gz`, `/templates` доступны без авторизации.
+The `/health`, `/setup`, `/update-bundle`, `/bundle.tar.gz`, and `/templates` endpoints are available without authorization.
 
-## Мост памяти (Memory Bridge)
+## Memory Bridge
 
-Мост автоматически синхронизирует знания между сессиями Claude Code и сервером ruflo.
+The bridge automatically synchronizes knowledge between Claude Code sessions and the ruflo server.
 
 ```
 ┌─────────────────────┐         ┌──────────────┐
@@ -366,87 +368,87 @@ Authorization: Bearer <token>
 └─────────────────────┘         └──────────────┘
 ```
 
-**При старте сессии** (`auto-memory-hook.mjs import`):
-- загружает паттерны проекта из namespace = имя директории проекта
-- загружает shared-паттерны (общие для всех проектов)
-- выводит в контекст сессии Claude Code
+**At session start** (`auto-memory-hook.mjs import`):
+- loads project patterns from the namespace named after the project directory
+- loads shared patterns (common to all projects)
+- emits them into the Claude Code session context
 
-**При остановке** (`auto-memory-hook.mjs sync`):
-- читает Claude auto-memory файлы (`~/.claude/projects/.../memory/*.md`)
-- пушит feedback и project записи в ruflo-hub
-- доступно в следующей сессии и из других проектов
+**At stop** (`auto-memory-hook.mjs sync`):
+- reads Claude auto-memory files (`~/.claude/projects/.../memory/*.md`)
+- pushes feedback and project entries to ruflo-hub
+- available in the next session and from other projects
 
-### Ручное управление
+### Manual control
 
 ```bash
-# Статус моста
+# Bridge status
 node .claude/helpers/auto-memory-hook.mjs status
 
-# Принудительная синхронизация
+# Force sync
 node .claude/helpers/auto-memory-hook.mjs sync
 
-# Загрузить паттерны
+# Load patterns
 node .claude/helpers/auto-memory-hook.mjs import
 ```
 
-## Шаблоны (templates/)
+## Templates (templates/)
 
-Файлы в `templates/` раздаются через `/templates/:name` и используются скриптом `/setup`:
+Files in `templates/` are served via `/templates/:name` and used by the `/setup` script:
 
-| Файл | Назначение |
-|------|-----------|
-| `auto-memory-hook.mjs` | Мост памяти — HTTP-клиент к ruflo-hub |
-| `hook-handler.cjs` | Обработчик хуков Claude Code (routing, status, edit tracking) |
-| `statusline.cjs` | Генератор статусной строки (git, model, context, cost, swarm) |
-| `settings.json` | Шаблон `.claude/settings.json` с настройками хуков |
+| File | Purpose |
+|------|---------|
+| `auto-memory-hook.mjs` | Memory bridge — HTTP client for ruflo-hub |
+| `hook-handler.cjs` | Claude Code hook handler (routing, status, edit tracking) |
+| `statusline.cjs` | Statusline generator (git, model, context, cost, swarm) |
+| `settings.json` | Template for `.claude/settings.json` with hook configuration |
 
-### Определение URL сервера
+### Server URL resolution
 
-`auto-memory-hook.mjs` определяет URL сервера в порядке приоритета:
+`auto-memory-hook.mjs` resolves the server URL in this priority order:
 
-1. Переменная окружения `RUFLO_URL`
-2. Файл `.claude-flow/ruflo.json` (создаётся `/setup`)
-3. Авто-обнаружение из соседнего проекта `ruflo-hub/`
+1. The `RUFLO_URL` environment variable
+2. The `.claude-flow/ruflo.json` file (created by `/setup`)
+3. Auto-discovery from a sibling `ruflo-hub/` project
 4. Fallback: `http://localhost:3000/mcp`
 
-## Переменные окружения
+## Environment variables
 
-| Переменная | По умолчанию | Описание |
-|-----------|-------------|----------|
-| `RUFLO_PORT` | `3000` | Порт MCP-сервера |
-| `POSTGRES_HOST` | `localhost` | Хост PostgreSQL |
-| `POSTGRES_PORT` | `5432` | Порт PostgreSQL |
-| `POSTGRES_DB` | `ruflo` | Имя базы данных |
-| `POSTGRES_USER` | `ruflo` | Пользователь |
-| `POSTGRES_PASSWORD` | `ruflo` | Пароль (сменить!) |
-| `MCP_AUTH_TOKEN` | — | Bearer-токен для авторизации (если пуст — без авторизации) |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUFLO_PORT` | `3000` | MCP server port |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `ruflo` | Database name |
+| `POSTGRES_USER` | `ruflo` | User |
+| `POSTGRES_PASSWORD` | `ruflo` | Password (change it!) |
+| `MCP_AUTH_TOKEN` | — | Bearer token for authorization (if empty — no auth) |
 
-## Бекап
+## Backup
 
 ```bash
-# Бекап
+# Backup
 docker exec <postgres-container> pg_dump -U ruflo ruflo > backup.sql
 
-# Восстановление
+# Restore
 cat backup.sql | docker exec -i <postgres-container> psql -U ruflo ruflo
 ```
 
-## Обновление ruflo
+## Updating ruflo
 
-Пакет `ruflo` зафиксирован в образе на момент сборки.
+The `ruflo` package is pinned in the image at build time.
 
-**Пересборка образа (рекомендуемый):**
+**Image rebuild (recommended):**
 ```bash
-# Локально
+# Locally
 docker compose build --no-cache
 docker compose up -d
 
-# Для Docker Hub
+# For Docker Hub
 docker build --no-cache -t jazzmax/ruflo-hub:latest .
 docker push jazzmax/ruflo-hub:latest
 ```
 
-**Обновление внутри контейнера (быстро, не переживёт рестарт):**
+**Update inside the container (fast, doesn't survive a restart):**
 ```bash
 docker exec <ruflo-container> npm install -g ruflo@latest
 docker restart <ruflo-container>
@@ -458,7 +460,7 @@ docker restart <ruflo-container>
 docker pull jazzmax/ruflo-hub:latest
 ```
 
-## Сборка из исходников
+## Build from source
 
 ```bash
 git clone https://github.com/jazz-max/ruflo-hub.git

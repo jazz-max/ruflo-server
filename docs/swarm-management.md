@@ -1,32 +1,32 @@
-# Swarm Management в ruflo
+# Swarm Management in ruflo
 
-Как ruflo управляет роями (swarms) и агентами. Практические наблюдения на ruflo@3.5.80 + объяснение, что считается что в статуслайне и зачем это нужно.
+How ruflo manages swarms and agents. Practical observations on ruflo@3.5.80 plus an explanation of what counts as what in the statusline and why it matters.
 
 ---
 
-## Ключевая концепция: swarm и agent — это записи, не процессы
+## Key concept: swarm and agent are records, not processes
 
-В ruflo **swarm** и **agent** — это **координационные записи в БД сервера** (sql.js `memory.db`). Никакие фоновые процессы не запускаются. CPU не расходуется. Память в контейнере не растёт.
+In ruflo, **swarm** and **agent** are **coordination records in the server database** (sql.js `memory.db`). No background processes are started. CPU is not consumed. Memory inside the container does not grow.
 
 ```
 swarm_init  → INSERT INTO swarms(id, topology, maxAgents, strategy, status='running')
 agent_spawn → INSERT INTO agents(id, type, model, status='idle', health=1)
 ```
 
-Это похоже на «заявку в очередь»: запись есть — но работать она начнёт только когда её кто-то возьмёт. Агент в статусе `idle` ничего не делает; он ждёт, пока Claude Code (или `claude -p`) пойдёт и выполнит задачу **от его имени**.
+This is similar to a "ticket in a queue": the record exists, but it only starts working when someone picks it up. An agent in `idle` status does nothing; it waits for Claude Code (or `claude -p`) to go and execute a task **on its behalf**.
 
-Поэтому:
-- **Старые swarm'ы и idle-агенты в CPU не жрут** — их можно оставить без технического вреда.
-- **Но они накапливают мусор в БД** — если каждая сессия спавнит новых без cleanup, через месяц в `agent_list` будут сотни записей.
-- **Команда `autoScaling: true` в swarm config** — это не демон, а рекомендация для Claude Code. Сервер сам агентов не создаёт.
+Therefore:
+- **Old swarms and idle agents do not consume CPU** — they can be left in place without technical harm.
+- **But they accumulate junk in the DB** — if every session spawns new ones without cleanup, within a month there will be hundreds of entries in `agent_list`.
+- **The `autoScaling: true` flag in the swarm config** is not a daemon but a recommendation for Claude Code. The server does not create agents on its own.
 
 ---
 
-## Жизненный цикл
+## Lifecycle
 
 ```
 ┌────────────┐  swarm_init({ topology, maxAgents, strategy })
-│  (нет)     │──────────────────────────────────────────────→┐
+│   (none)   │──────────────────────────────────────────────→┐
 └────────────┘                                               │
                                                              ▼
                                                        ┌───────────┐
@@ -37,7 +37,7 @@ agent_spawn → INSERT INTO agents(id, type, model, status='idle', health=1)
                                                        ┌───────────┐
                                                        │   idle    │←──┐
                                                        └─────┬─────┘   │
-                                                             │         │ работа закончена
+                                                             │         │ work finished
                        Claude Code Task tool / claude -p     │         │
                                                              ▼         │
                                                        ┌───────────┐   │
@@ -49,82 +49,82 @@ agent_spawn → INSERT INTO agents(id, type, model, status='idle', health=1)
                                                        │terminated │
                                                        └───────────┘
 
-swarm_shutdown → status = 'shutdown', maxAgents зануляется у новых spawn
+swarm_shutdown → status = 'shutdown', maxAgents is zeroed for new spawns
 ```
 
-Важно:
-- Агент сам не переходит из `idle` в `working` — его активирует **Claude Code через Task tool** или `claude -p`.
-- Агент не «завершается автоматически» — он остаётся `idle` навсегда, пока не позвать `agent_terminate`.
-- Swarm после `swarm_shutdown` остаётся в истории как завершённый, `totalSwarms` не уменьшается.
+Important:
+- An agent does not move from `idle` to `working` on its own — it is activated by **Claude Code via the Task tool** or `claude -p`.
+- An agent does not "terminate automatically" — it stays `idle` forever until `agent_terminate` is called.
+- After `swarm_shutdown`, the swarm remains in history as completed, and `totalSwarms` does not decrease.
 
 ---
 
-## Как реально выполняется работа
+## How work is actually performed
 
-Ruflo **сам ничего не исполняет**. MCP-инструменты вида `agent_spawn` только регистрируют роль в БД. Работу делает Claude Code:
+Ruflo **does not execute anything itself**. MCP tools like `agent_spawn` only register a role in the DB. The work is done by Claude Code:
 
 ```
-Пользователь: «напиши код через агента»
+User: "write code via an agent"
             ↓
-Claude Code использует Task tool с ролью "coder"
+Claude Code uses the Task tool with the "coder" role
             ↓
-Claude Code делает `agent_spawn({ agentType: "coder" })` → ruflo создаёт запись
+Claude Code calls `agent_spawn({ agentType: "coder" })` → ruflo creates a record
             ↓
-Claude Code сам запускает subprocess `claude -p "напиши код"` с промптом, учитывающим роль
+Claude Code itself launches the subprocess `claude -p "write code"` with a prompt that accounts for the role
             ↓
-Subprocess возвращает результат → Claude Code шлёт его пользователю
+The subprocess returns a result → Claude Code sends it to the user
             ↓
-Опционально: Claude Code пишет в ruflo `task_complete(agentId, result)` → запись в БД обновляется
+Optionally: Claude Code writes `task_complete(agentId, result)` to ruflo → the record in the DB is updated
 ```
 
-Ключевой момент: «агент» — это **роль + routing подсказка для модели** (haiku/sonnet/opus), а не автономный исполнитель.
+Key point: an "agent" is a **role + routing hint for the model** (haiku/sonnet/opus), not an autonomous executor.
 
-Поэтому вопрос «сколько агентов реально работает» не имеет смысла в привычном понимании — **все агенты или `idle`, или исполняются Claude Code как subprocess**. Одновременно «работающих» больше, чем параллельных Task tool calls, быть не может.
+Therefore, the question "how many agents are actually working" does not make sense in the usual way — **all agents are either `idle` or being executed by Claude Code as a subprocess**. There cannot be more simultaneously "working" agents than parallel Task tool calls.
 
 ---
 
-## Основные MCP-команды
+## Main MCP commands
 
-### Создание и управление
+### Creation and management
 
-| Команда | Что делает | Пример аргументов |
-|---------|-----------|-------------------|
-| `swarm_init` | Создаёт swarm (координационный контейнер) | `{ topology: "mesh", maxAgents: 5, strategy: "balanced" }` |
-| `agent_spawn` | Регистрирует агента | `{ agentType: "researcher", task: "..." }` |
-| `agent_list` | Возвращает всех агентов (есть `includeTerminated`) | `{}` |
-| `agent_terminate` | Удаляет агента | `{ agentId: "agent-..." }` |
-| `swarm_status` | Статус последнего (или по `swarmId`) swarm | `{}` |
-| `swarm_shutdown` | Завершает swarm | `{ swarmId: "swarm-...", graceful: true }` |
+| Command | What it does | Example arguments |
+|---------|--------------|-------------------|
+| `swarm_init` | Creates a swarm (coordination container) | `{ topology: "mesh", maxAgents: 5, strategy: "balanced" }` |
+| `agent_spawn` | Registers an agent | `{ agentType: "researcher", task: "..." }` |
+| `agent_list` | Returns all agents (supports `includeTerminated`) | `{}` |
+| `agent_terminate` | Removes an agent | `{ agentId: "agent-..." }` |
+| `swarm_status` | Status of the latest (or by `swarmId`) swarm | `{}` |
+| `swarm_shutdown` | Terminates a swarm | `{ swarmId: "swarm-...", graceful: true }` |
 
-### Топологии (`topology`)
+### Topologies (`topology`)
 
-| Значение | Идея | Когда |
-|----------|------|-------|
-| `hierarchical` | Queen → workers | Централизованные задачи |
-| `mesh` | Все со всеми | Несвязанные параллельные задачи |
-| `hierarchical-mesh` | Гибрид | Крупные проекты с подгруппами |
-| `ring` | Последовательная передача | Pipeline-обработка |
-| `star` | Центральный broker | Агрегация |
-| `hybrid` | Автовыбор | Неясная задача |
-| `adaptive` | Меняет на лету | Долгие жизненные циклы |
+| Value | Idea | When to use |
+|-------|------|-------------|
+| `hierarchical` | Queen → workers | Centralized tasks |
+| `mesh` | Everyone with everyone | Independent parallel tasks |
+| `hierarchical-mesh` | Hybrid | Large projects with subgroups |
+| `ring` | Sequential handoff | Pipeline processing |
+| `star` | Central broker | Aggregation |
+| `hybrid` | Auto-selection | Unclear task |
+| `adaptive` | Changes on the fly | Long lifecycles |
 
-Практически: топология влияет на то, **как Claude Code будет думать о координации**. На сервер это записывается просто как строка; от неё не зависит CPU/память.
+In practice, topology affects **how Claude Code will think about coordination**. On the server, it is simply recorded as a string; CPU/memory does not depend on it.
 
-### Стратегии (`strategy`)
+### Strategies (`strategy`)
 
-| Значение | Смысл |
-|----------|-------|
-| `specialized` | Узкие роли (researcher, coder, tester) не перепрыгивают |
-| `balanced` | Агенты универсальны |
-| `adaptive` | Выбор при spawn |
+| Value | Meaning |
+|-------|---------|
+| `specialized` | Narrow roles (researcher, coder, tester) do not overlap |
+| `balanced` | Agents are generalists |
+| `adaptive` | Chosen at spawn time |
 
 ---
 
-## Что показывает статуслайн (`🤖 Swarm`)
+## What the statusline shows (`🤖 Swarm`)
 
-Формат: `🤖 Swarm ◉↻ [agentCount/maxAgents]`
+Format: `🤖 Swarm ◉↻ [agentCount/maxAgents]`
 
-Источник — `/stats` endpoint на ruflo-hub:
+Source: the `/stats` endpoint on ruflo-hub:
 ```json
 {
   "swarm": {
@@ -136,92 +136,92 @@ Subprocess возвращает результат → Claude Code шлёт ег
 }
 ```
 
-Как это строится на сервере (`server.mjs /stats`):
-1. Зовёт `swarm_status` → берёт `maxAgents`, `topology`, `active`
-2. Зовёт `agent_list` → считает записи (без `terminated`)
-3. Берёт `max(swarm_status.agentCount, agent_list.length)` — потому что `swarm_status.agentCount` часто отстаёт от реальности (баг ruflo)
+How it is built on the server (`server.mjs /stats`):
+1. Calls `swarm_status` → takes `maxAgents`, `topology`, `active`
+2. Calls `agent_list` → counts records (excluding `terminated`)
+3. Takes `max(swarm_status.agentCount, agent_list.length)` — because `swarm_status.agentCount` often lags reality (ruflo bug)
 
-**Число меняется только от явных команд:**
+**The number changes only in response to explicit commands:**
 - `agent_spawn` → +1
 - `agent_terminate` → −1
-- `swarm_shutdown` → не трогает agent_list напрямую, но после него новые spawn не привязываются к закрытому swarm
+- `swarm_shutdown` → does not touch agent_list directly, but afterwards new spawns are not bound to the closed swarm
 
-**Число НЕ меняется автоматически**, даже если Claude Code делает Task tool (агенты `idle → working → idle` — счётчик один и тот же).
+**The number does NOT change automatically**, even if Claude Code uses the Task tool (agents go `idle → working → idle` — the counter stays the same).
 
-Индикатор `◉↻`:
-- `◉` (зелёный) — swarm active
-- `○` (серый) — нет активных swarm
-- `↻` — данные с ruflo-hub (а не из локальных файлов проекта)
-
----
-
-## Известные квирки ruflo@3.5.80
-
-1. **`swarm_status.agentCount` отстаёт.** Часто показывает 0, даже если только что сделал `agent_spawn`. Используй `agent_list.total` для правды.
-
-2. **`totalSwarms` не сбрасывается.** Даже после shutdown, счётчик остаётся. Это число созданных swarm за всё время жизни БД.
-
-3. **Agents переживают shutdown.** `swarm_shutdown` не завершает агентов, они остаются `idle` и числятся в общем `agent_list`. Надо терминейтить отдельно.
-
-4. **Один «активный swarm».** Несколько swarm_init создают несколько записей, но `swarm_status` без `swarmId` возвращает всегда последний.
-
-5. **`autoScaling: true` не спавнит.** Это флаг для Claude Code, не для сервера.
-
-6. **Persistence.** Swarm state пишется в `/app/.claude-flow/swarm/swarm-state.json` внутри контейнера. Persist работает **только** если в compose подмонтирован volume `/app/.claude-flow` (см. `docker-compose.yml`).
+The `◉↻` indicator:
+- `◉` (green) — swarm active
+- `○` (gray) — no active swarm
+- `↻` — data from ruflo-hub (not from local project files)
 
 ---
 
-## Чистка старых записей
+## Known quirks of ruflo@3.5.80
 
-Быстрый цикл вручную через Claude Code:
+1. **`swarm_status.agentCount` lags.** Often shows 0 even right after `agent_spawn`. Use `agent_list.total` for the truth.
+
+2. **`totalSwarms` does not reset.** Even after shutdown, the counter remains. This is the number of swarms created over the entire lifetime of the DB.
+
+3. **Agents survive shutdown.** `swarm_shutdown` does not terminate agents; they remain `idle` and are counted in the overall `agent_list`. They must be terminated separately.
+
+4. **A single "active swarm".** Multiple `swarm_init` calls create multiple records, but `swarm_status` without a `swarmId` always returns the latest one.
+
+5. **`autoScaling: true` does not spawn.** This is a flag for Claude Code, not for the server.
+
+6. **Persistence.** Swarm state is written to `/app/.claude-flow/swarm/swarm-state.json` inside the container. Persistence works **only** if the `/app/.claude-flow` volume is mounted in compose (see `docker-compose.yml`).
+
+---
+
+## Cleaning up old records
+
+A quick manual cycle via Claude Code:
 
 ```
-> Покажи всех агентов в ruflo и shutdown всех swarm старше 24 часов.
+> Show me all agents in ruflo and shutdown all swarms older than 24 hours.
 ```
 
-Клод последовательно:
-1. `mcp__ruflo__agent_list({ includeTerminated: false })` → массив агентов
-2. Для каждого idle-агента старше порога: `mcp__ruflo__agent_terminate({ agentId })`
-3. `mcp__ruflo__swarm_status()` для последнего swarm
+Claude will sequentially:
+1. `mcp__ruflo__agent_list({ includeTerminated: false })` → an array of agents
+2. For each idle agent older than the threshold: `mcp__ruflo__agent_terminate({ agentId })`
+3. `mcp__ruflo__swarm_status()` for the latest swarm
 4. `mcp__ruflo__swarm_shutdown({ swarmId, graceful: true })`
 
-Через curl (без MCP):
+Via curl (without MCP):
 ```bash
-# Список агентов
+# List agents
 curl -X POST http://server:3201/mcp \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"agent_list","arguments":{}},"id":1}' \
   | jq -r '.result.content[0].text' | jq '.agents[].agentId'
 
-# Завершение конкретного
+# Terminate a specific one
 curl -X POST http://server:3201/mcp \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"agent_terminate","arguments":{"agentId":"agent-..."}},"id":1}'
 ```
 
-Рекомендация: завести cron-job в `ruflo-hub` контейнере, который раз в сутки подчищает агентов старше 7 дней. Пока не реализовано — делается вручную.
+Recommendation: set up a cron job inside the `ruflo-hub` container that clears agents older than 7 days once a day. Not implemented yet — done manually for now.
 
 ---
 
-## Примеры
+## Examples
 
-### Мини-swarm на одну задачу
+### Mini-swarm for a single task
 
 ```typescript
-// 1. Инициализация
+// 1. Initialization
 await mcp.swarm_init({ topology: 'mesh', maxAgents: 3, strategy: 'specialized' });
 
-// 2. Три агента
-await mcp.agent_spawn({ agentType: 'researcher', task: 'найди best practices' });
-await mcp.agent_spawn({ agentType: 'coder', task: 'реализуй модуль' });
-await mcp.agent_spawn({ agentType: 'tester', task: 'покрой тестами' });
+// 2. Three agents
+await mcp.agent_spawn({ agentType: 'researcher', task: 'find best practices' });
+await mcp.agent_spawn({ agentType: 'coder', task: 'implement the module' });
+await mcp.agent_spawn({ agentType: 'tester', task: 'cover with tests' });
 
-// 3. Работа — через Claude Code Task tool (сам ruflo ничего не делает)
-//    Claude Code использует роли и модели из agent_list
+// 3. Work — via the Claude Code Task tool (ruflo itself does nothing)
+//    Claude Code uses roles and models from agent_list
 
-// 4. Очистка
+// 4. Cleanup
 const { agents } = await mcp.agent_list({});
 for (const a of agents) {
   await mcp.agent_terminate({ agentId: a.agentId });
@@ -230,7 +230,7 @@ const status = await mcp.swarm_status({});
 await mcp.swarm_shutdown({ swarmId: status.swarmId });
 ```
 
-### Просто «посмотреть статус»
+### Just "check the status"
 
 ```bash
 curl http://server:3201/stats
@@ -239,6 +239,6 @@ curl http://server:3201/stats
 
 ---
 
-## Резюме одним абзацем
+## Summary in one paragraph
 
-Swarm и agent в ruflo — это **координационные метаданные в БД**, а не автономные процессы. `swarm_init` и `agent_spawn` — дешёвые операции (несколько байт в БД). Реальную работу выполняет Claude Code через свой Task tool, используя записи агентов как подсказки по моделям и ролям. Статуслайн показывает количество **зарегистрированных** агентов, и это число меняется **только** от явных `agent_spawn`/`agent_terminate`. Периодически надо чистить старые idle-записи — они не жрут ресурсы, но мусорят в `agent_list`.
+In ruflo, swarm and agent are **coordination metadata in the DB**, not autonomous processes. `swarm_init` and `agent_spawn` are cheap operations (a few bytes in the DB). The actual work is performed by Claude Code via its Task tool, using agent records as hints about models and roles. The statusline shows the number of **registered** agents, and this number changes **only** in response to explicit `agent_spawn`/`agent_terminate` calls. Old idle records need to be cleaned up periodically — they do not consume resources, but they clutter `agent_list`.

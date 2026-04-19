@@ -1,92 +1,92 @@
-# Ruflo — практический гайд по использованию
+# Ruflo — practical usage guide
 
-Выжимка из официального README [ruvnet/ruflo](https://github.com/ruvnet/ruflo) без маркетинга. Что реально надо знать и делать.
-
----
-
-## Что такое ruflo на самом деле
-
-Оркестратор для Claude Code с 4 основными функциями:
-
-1. **Хуки** — автоматически подбирают модель/агента под задачу, записывают паттерны, триггерят фоновые процессы
-2. **Память** — векторная БД (HNSW) для паттернов, 3 уровня scope (проект/локальный/пользовательский)
-3. **Swarm** — координация нескольких агентов в одной задаче (hierarchical/mesh/ring/star)
-4. **Skills** — 130+ готовых сценариев (`sparc:coder`, `github-code-review`, и т.д.)
-
-Главная идея из их же доков:
-
-> **После `init` просто работай в Claude Code как обычно — хуки сами маршрутизируют задачи, учатся на успехах и координируют работу в фоне. 310+ MCP-tools нужны только для тонкого контроля.**
+A distilled version of the official README from [ruvnet/ruflo](https://github.com/ruvnet/ruflo), marketing aside. What you actually need to know and do.
 
 ---
 
-## Повседневные команды (что реально используется)
+## What ruflo actually is
+
+An orchestrator for Claude Code with 4 core functions:
+
+1. **Hooks** — automatically pick the model/agent for a task, record patterns, trigger background processes
+2. **Memory** — vector DB (HNSW) for patterns, 3 scope levels (project / local / user)
+3. **Swarm** — coordination of multiple agents on one task (hierarchical/mesh/ring/star)
+4. **Skills** — 130+ ready-made scenarios (`sparc:coder`, `github-code-review`, etc.)
+
+The main idea straight from their docs:
+
+> **After `init` just work in Claude Code as usual — hooks route tasks on their own, learn from successes, and coordinate work in the background. The 310+ MCP tools are only needed for fine-grained control.**
+
+---
+
+## Everyday commands (what actually gets used)
 
 ```bash
-# Один раз — инициализация проекта
-npx ruflo@latest init           # создаст .claude/, .claude-flow/, хуки и т.п.
+# One-time — project initialization
+npx ruflo@latest init           # creates .claude/, .claude-flow/, hooks, etc.
 
-# Обновление без потери данных
+# Upgrade without losing data
 npx ruflo@latest init upgrade
 
-# С добавлением новых skills/agents
+# Adding new skills/agents
 npx ruflo@latest init upgrade --add-missing
 
-# Проверить установку
-npx ruflo@latest mcp list       # что доступно
-node .claude/helpers/hook-handler.cjs stats   # статистика обучения
+# Verify the install
+npx ruflo@latest mcp list       # what's available
+node .claude/helpers/hook-handler.cjs stats   # learning stats
 ```
 
-Всё остальное — через **MCP внутри Claude Code**, без CLI.
+Everything else is done through **MCP inside Claude Code**, without the CLI.
 
-Для подключения к централизованному `ruflo-hub` вместо локальной установки используй `/setup`-скрипт из [ruflo-hub](https://github.com/jazz-max/ruflo-hub) — он настраивает хуки + мост памяти + MCP за один `curl | bash`.
+To connect to a centralized `ruflo-hub` instead of a local install, use the `/setup` script from [ruflo-hub](https://github.com/jazz-max/ruflo-hub) — it configures hooks + memory bridge + MCP in a single `curl | bash`.
 
 ---
 
-## Самоучащийся цикл (Intelligence Loop)
+## Self-learning loop (Intelligence Loop)
 
-Ключевой паттерн ruflo (ADR-050), который работает автоматически через хуки:
+The key ruflo pattern (ADR-050), which runs automatically via hooks:
 
 ```
-1. RETRIEVE    memory_search("похожие задачи")              ← перед началом
-2. JUDGE       оценка что получилось / не получилось
-3. DISTILL     memory_store("...", namespace="patterns")    ← после успеха
-4. CONSOLIDATE фоновая агрегация паттернов (EWC++)
-5. ROUTE       Q-learning выбирает агента/модель в след. раз
+1. RETRIEVE    memory_search("similar tasks")                ← before starting
+2. JUDGE       evaluate what worked / what didn't
+3. DISTILL     memory_store("...", namespace="patterns")    ← after success
+4. CONSOLIDATE background pattern aggregation (EWC++)
+5. ROUTE       Q-learning picks the agent/model next time
 ```
 
-Ты ничего не делаешь руками — хуки `post-edit`, `post-task` триггерят это сами.
+You don't do anything by hand — the `post-edit` and `post-task` hooks trigger this themselves.
 
 ---
 
-## 5 MCP-инструментов, которые реально стоит знать
+## 5 MCP tools actually worth knowing
 
-Из 313 инструментов ruflo **эти закрывают 90% кейсов**:
+Out of ruflo's 313 tools, **these cover 90% of cases**:
 
-| Tool | Когда вызывать | Зачем |
+| Tool | When to call | Why |
 |------|----------------|-------|
-| `memory_search` | **Перед** сложной задачей | Найти готовые паттерны команды |
-| `memory_store` | **После** успешного решения | Записать в `namespace="patterns"` или `"shared"` |
-| `swarm_init` | Когда задача делится на 3+ независимых треков | Координация + anti-drift |
-| `agent_spawn` | В паре со `swarm_init` | Зарегистрировать роли (coder, tester, reviewer) |
-| `hooks_route` | Не уверен какую модель брать | Q-learning выберет сам |
+| `memory_search` | **Before** a complex task | Find ready-made team patterns |
+| `memory_store` | **After** a successful solution | Save into `namespace="patterns"` or `"shared"` |
+| `swarm_init` | When a task splits into 3+ independent tracks | Coordination + anti-drift |
+| `agent_spawn` | Paired with `swarm_init` | Register roles (coder, tester, reviewer) |
+| `hooks_route` | Not sure which model to pick | Q-learning decides for you |
 
 ---
 
-## Когда реально нужен swarm
+## When a swarm is actually needed
 
-Из их же документации — **только для сложных задач с явным параллелизмом**. Рекомендуемая anti-drift конфигурация:
+Per their own documentation — **only for complex tasks with explicit parallelism**. Recommended anti-drift configuration:
 
 ```javascript
 swarm_init({
-  topology: "hierarchical",   // queen → workers, предотвращает «расползание»
-  maxAgents: 8,               // не больше, иначе теряется фокус
-  strategy: "specialized"     // чёткие роли, без пересечений
+  topology: "hierarchical",   // queen → workers, prevents "drift"
+  maxAgents: 8,               // no more, or focus is lost
+  strategy: "specialized"     // clear roles, no overlap
 })
 ```
 
-### Task → Agent Routing (их таблица)
+### Task → Agent Routing (their table)
 
-| Код | Тип задачи | Агенты |
+| Code | Task type | Agents |
 |-----|-----------|--------|
 | 1 | Bug fix | coordinator, researcher, coder, tester |
 | 3 | Feature | coordinator, architect, coder, tester, reviewer |
@@ -95,30 +95,30 @@ swarm_init({
 | 9 | Security | coordinator, security-architect, auditor |
 | 11 | Memory | coordinator, memory-specialist, perf-engineer |
 
-Для простых задач (одиночный bug-fix, мелкие правки) — **не нужен**. Claude Code сам справится через Task tool.
+For simple tasks (a one-off bug fix, small tweaks) — **not needed**. Claude Code handles it on its own via the Task tool.
 
-Подробнее про концепцию swarm/agent как «записей в БД, а не процессов» — см. [`swarm-management.md`](./swarm-management.md).
+More on the swarm/agent concept as "records in a DB, not processes" — see [`swarm-management.md`](./swarm-management.md).
 
 ---
 
-## Skills — то что многие упускают
+## Skills — what many people miss
 
-Skills = сценарии которые Claude Code загружает по команде. У ruflo их 130+:
+Skills = scenarios that Claude Code loads on command. Ruflo ships 130+:
 
 ```
 $sparc:architect              → SPARC Architect Mode
 $sparc:coder                  → SPARC Coder Mode
 $github-code-review           → PR review swarm
-$swarm-orchestration          → паттерны swarm
+$swarm-orchestration          → swarm patterns
 $reasoningbank-intelligence   → learning patterns
 $pair-programming             → driver/navigator
 ```
 
-Вызываются через обычный запрос: *«используй skill sparc:architect для проектирования X»*.
+Invoked via a normal request: *"use the sparc:architect skill to design X"*.
 
-### Популярные категории
+### Popular categories
 
-| Категория | Примеры |
+| Category | Examples |
 |-----------|---------|
 | **SPARC** | `sparc:architect`, `sparc:coder`, `sparc:tester`, `sparc:debugger` |
 | **V3 Core** | `v3-security-overhaul`, `v3-memory-unification`, `v3-performance-optimization` |
@@ -129,77 +129,77 @@ $pair-programming             → driver/navigator
 
 ---
 
-## Практический workflow на день
+## A practical day-to-day workflow
 
 ```
-1. Утро, первая сессия Claude Code:
+1. Morning, first Claude Code session:
    - Hook SessionStart → auto-memory-hook.mjs import
-   - Из ruflo-hub в контекст подтянулись паттерны команды за вчера
+   - Yesterday's team patterns are pulled into context from ruflo-hub
 
-2. Начинаю задачу «добавить фичу X»:
-   - (я) «найди в памяти что мы делали похожего»
-   - Claude: mcp__ruflo__memory_search("похожее на X")
-   - Claude видит паттерн, адаптирует
+2. Starting the task "add feature X":
+   - (me) "search memory for anything similar we've done"
+   - Claude: mcp__ruflo__memory_search("similar to X")
+   - Claude sees the pattern, adapts it
 
-3. Задача крупная, пять треков:
-   - (я) «используй hierarchical swarm из 6 агентов»
-   - Claude: swarm_init + 6× agent_spawn с ролями coder/tester/arch/...
-   - Claude внутри своей сессии Task tool параллелит работу
+3. The task is large, five tracks:
+   - (me) "use a hierarchical swarm of 6 agents"
+   - Claude: swarm_init + 6× agent_spawn with coder/tester/arch/... roles
+   - Claude parallelizes work via the Task tool inside its own session
 
-4. Задача сложная, хочу учесть best practices:
-   - (я) «используй skill sparc:architect»
-   - Claude загружает SPARC-сценарий, пошагово проектирует
+4. The task is complex, want best practices applied:
+   - (me) "use the sparc:architect skill"
+   - Claude loads the SPARC scenario, designs step by step
 
-5. Задача решена:
-   - Hook post-task → автоматически memory_store паттерна
-   - Stop hook → auto-memory-hook.mjs sync → шарит с командой
+5. Task solved:
+   - Hook post-task → automatic memory_store of the pattern
+   - Stop hook → auto-memory-hook.mjs sync → shares with the team
 
-6. Вечером:
-   - Никаких cleanup не надо, всё персист в ruflo-hub volumes
+6. In the evening:
+   - No cleanup needed, everything persists in ruflo-hub volumes
 ```
 
 ---
 
-## 3-tier model routing (экономия API-расходов)
+## 3-tier model routing (API cost savings)
 
-Ruflo автоматически маршрутизирует задачи на оптимальный handler:
+Ruflo automatically routes tasks to the optimal handler:
 
-| Tier | Handler | Латентность | Стоимость | Кейсы |
+| Tier | Handler | Latency | Cost | Use cases |
 |------|---------|-------------|-----------|-------|
 | **1** | Agent Booster (WASM) | <1ms | $0 | var→const, add-types, remove-console |
 | **2** | Haiku/Sonnet | 500ms-2s | $0.0002-$0.003 | Bug fixes, refactoring, feature implementation |
 | **3** | Opus | 2-5s | $0.015 | Architecture, security design, distributed systems |
 
-Routing: Q-learning с epsilon-greedy exploration, sub-millisecond decision latency. Экономия 30-50% токенов.
+Routing: Q-learning with epsilon-greedy exploration, sub-millisecond decision latency. 30-50% token savings.
 
-### Сигналы в выводе хуков
+### Signals in hook output
 
 ```bash
-# Agent Booster доступен — LLM пропускаем
+# Agent Booster available — skip the LLM
 [AGENT_BOOSTER_AVAILABLE] Intent: var-to-const
 → Use Edit tool directly, instant (regex-based, no LLM call)
 
-# Рекомендация модели для Task tool
+# Model recommendation for the Task tool
 [TASK_MODEL_RECOMMENDATION] Use model="haiku"
 → Pass model="haiku" to Task tool for cost savings
 ```
 
 ---
 
-## Что стоит запомнить из официальных доков
+## What's worth remembering from the official docs
 
-- **«После init просто пиши в Claude нормально»** — не надо учить 310 tools. Хуки всё разрулят.
-- **Agent Booster (WASM)** — простые трансформации (var→const, add-types) выполняются **без** LLM, мгновенно. Экономия $ и времени.
-- **3-tier routing** — простое через WASM (0$), среднее через Haiku/Sonnet, сложное через Opus. Автоматически.
-- **Skills > raw commands** — вместо «сделай swarm с такими-то настройками» скажи «используй skill $swarm-orchestration». Уже проверенный сценарий.
+- **"After init just talk to Claude normally"** — no need to learn 310 tools. Hooks sort everything out.
+- **Agent Booster (WASM)** — simple transformations (var→const, add-types) run **without** an LLM, instantly. Saves $ and time.
+- **3-tier routing** — simple things via WASM ($0), medium via Haiku/Sonnet, complex via Opus. Automatically.
+- **Skills > raw commands** — instead of "build a swarm with these settings" say "use the $swarm-orchestration skill". A pre-vetted scenario.
 
 ---
 
-## Важно: большая часть «умных» фич требует настроенных хуков
+## Important: most of the "smart" features require configured hooks
 
-Хуки настраиваются в `.claude/settings.json` — их ставит `init`. Если хуки отключены или не настроены, работать будет только то что ты вызовешь руками через MCP.
+Hooks are configured in `.claude/settings.json` — `init` sets them up. If hooks are disabled or unconfigured, only what you invoke manually via MCP will work.
 
-Скрипт `/setup` из [ruflo-hub](https://github.com/jazz-max/ruflo-hub) как раз и ставит базовые хуки + мост памяти + MCP-подключение — одной командой:
+The `/setup` script from [ruflo-hub](https://github.com/jazz-max/ruflo-hub) installs the base hooks + memory bridge + MCP connection in one command:
 
 ```bash
 curl "http://<hub>:3000/setup?token=TOKEN&name=ruflo" | bash
@@ -207,21 +207,21 @@ curl "http://<hub>:3000/setup?token=TOKEN&name=ruflo" | bash
 
 ---
 
-## Установка ruflo локально (альтернатива ruflo-hub)
+## Installing ruflo locally (alternative to ruflo-hub)
 
-Если не нужен shared memory и хочешь ruflo как локальный инструмент:
+If you don't need shared memory and want ruflo as a local tool:
 
 ```bash
-# Пререкзит
+# Prerequisite
 npm install -g @anthropic-ai/claude-code
 
-# Быстрый init
+# Quick init
 npx ruflo@latest init --wizard
 
-# Или one-line с полной установкой
+# Or a one-line full install
 curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash -s -- --full
 
-# MCP-интеграция в Claude Code
+# MCP integration in Claude Code
 claude mcp add ruflo -- npx -y ruflo@latest mcp start
 ```
 
@@ -234,9 +234,9 @@ claude mcp add ruflo -- npx -y ruflo@latest mcp start
 
 ---
 
-## Итог в одном абзаце
+## Summary in one paragraph
 
-Ruflo — это **Claude Code на стероидах**: ставишь через `init`, и он автоматически запоминает что работает, маршрутизирует задачи на дешёвые модели когда можно, хранит коллективную память команды и даёт 130+ готовых сценариев. Основная ценность для команды — **shared memory** (один раз нашёл решение — вся команда получила). Swarm и прочее — для сложных задач одного разработчика, не для координации команды.
+Ruflo is **Claude Code on steroids**: you install it via `init`, and it automatically remembers what works, routes tasks to cheaper models when possible, stores the team's collective memory, and gives you 130+ ready-made scenarios. The main value for a team is **shared memory** (find a solution once — the whole team gets it). Swarm and the rest are for a single developer's complex tasks, not for team coordination.
 
 ---
 
