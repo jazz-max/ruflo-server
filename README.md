@@ -262,6 +262,25 @@ curl "http://MacBook-Pro-3.local:3201/setup?token=TOKEN" | bash
 - Клиенты вне локалки (VPN другой команды, удалённый сервер на VPS) — им `hostname.local` не зарезолвится. Там нужен публичный DNS (`ruflo.mycompany.com`) или туннель (Tailscale/Cloudflare Tunnel).
 - В компаниях с рестриктивной сетью — Bonjour/mDNS может быть выключен ИТ. Проверь через `ping $(hostname)` с клиентской машины.
 
+### Обновление bundle в уже настроенном проекте
+
+Когда в hub появились новые skills/agents/commands (или они обновились в Docker-образе), можно обновить только bundle — без повторного запуска `/setup`, который перезапишет конфиги:
+
+```bash
+# В текущей директории
+curl http://your-server:3000/update-bundle | bash
+
+# С указанием пути к проекту
+curl http://your-server:3000/update-bundle | bash -s /path/to/project
+
+# С принудительной перезаписью существующих файлов
+curl "http://your-server:3000/update-bundle?force=1" | bash
+```
+
+По умолчанию `tar -xzkf` (флаг `-k`) не трогает существующие файлы — только добавляет недостающие. С `?force=1` — полная перезапись. В отличие от `/setup`, этот endpoint не создаёт `.claude-flow/ruflo.json`, `.mcp.json` и `settings.json` — чисто bundle.
+
+Не забудь **перезапустить Claude Code** в проекте — skills грузятся на SessionStart.
+
 ### Ручное подключение MCP
 
 Если нужно добавить только MCP без хуков и моста памяти:
