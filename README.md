@@ -316,12 +316,17 @@ claude mcp add --transport http \
 | Method | URL | Description |
 |--------|-----|-------------|
 | POST | `/mcp` | JSON-RPC proxy to ruflo MCP (main endpoint) |
+| GET / DELETE | `/mcp` | Returns `405 Method Not Allowed` (MCP is POST-only) |
 | GET | `/health` | Server status (`{"status":"ok","tools":257}`) |
+| GET | `/stats` | Statusline summary: vectors, namespaces, `dbSizeKB`, swarm state, intelligence score |
 | GET | `/setup` | Shell script for automatic project setup |
 | GET | `/update-bundle` | Shell script for bundle-only updates (skills+agents+commands) |
 | GET | `/bundle.tar.gz` | Tar.gz archive of the bundle (used by `/setup` and `/update-bundle`) |
 | GET | `/templates` | List of available templates |
 | GET | `/templates/:name` | Download a specific template |
+| GET | `/.well-known/oauth-authorization-server` | OAuth discovery stub (returns 404 so clients fall back to no-auth) |
+| GET | `/.well-known/oauth-protected-resource` | OAuth discovery stub (returns 404) |
+| POST | `/register` | OAuth dynamic-client stub (returns 404) |
 
 ### POST /mcp — JSON-RPC
 
@@ -350,7 +355,7 @@ If `MCP_AUTH_TOKEN` is set, all requests to `/mcp` require the header:
 Authorization: Bearer <token>
 ```
 
-The `/health`, `/setup`, `/update-bundle`, `/bundle.tar.gz`, and `/templates` endpoints are available without authorization.
+The `/health`, `/stats`, `/setup`, `/update-bundle`, `/bundle.tar.gz`, `/templates`, and the OAuth discovery stubs are available without authorization.
 
 ## Memory Bridge
 

@@ -314,12 +314,17 @@ claude mcp add --transport http \
 | Метод | URL | Описание |
 |-------|-----|----------|
 | POST | `/mcp` | JSON-RPC прокси к ruflo MCP (основной эндпоинт) |
+| GET / DELETE | `/mcp` | Возвращает `405 Method Not Allowed` (MCP работает только через POST) |
 | GET | `/health` | Статус сервера (`{"status":"ok","tools":257}`) |
+| GET | `/stats` | Сводка для statusline: векторы, namespaces, `dbSizeKB`, состояние swarm, intelligence score |
 | GET | `/setup` | Shell-скрипт для автоматической настройки проекта |
 | GET | `/update-bundle` | Shell-скрипт для обновления только bundle (skills+agents+commands) |
 | GET | `/bundle.tar.gz` | Tar-gz архив bundle (используется `/setup` и `/update-bundle`) |
 | GET | `/templates` | Список доступных шаблонов |
 | GET | `/templates/:name` | Скачать конкретный шаблон |
+| GET | `/.well-known/oauth-authorization-server` | Заглушка OAuth discovery (отдаёт 404, чтобы клиент откатился к подключению без авторизации) |
+| GET | `/.well-known/oauth-protected-resource` | Заглушка OAuth discovery (отдаёт 404) |
+| POST | `/register` | Заглушка OAuth dynamic-client (отдаёт 404) |
 
 ### POST /mcp — JSON-RPC
 
@@ -348,7 +353,7 @@ curl -X POST http://your-server:3000/mcp \
 Authorization: Bearer <token>
 ```
 
-Эндпоинты `/health`, `/setup`, `/update-bundle`, `/bundle.tar.gz`, `/templates` доступны без авторизации.
+Эндпоинты `/health`, `/stats`, `/setup`, `/update-bundle`, `/bundle.tar.gz`, `/templates` и заглушки OAuth discovery доступны без авторизации.
 
 ## Мост памяти (Memory Bridge)
 
