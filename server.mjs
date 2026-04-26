@@ -283,10 +283,12 @@ app.get('/bundle.tar.gz', (_req, res) => {
   });
 });
 
-// GET /update-bundle — return a shell script that installs only the bundle
+// GET /update-bundle — return a shell script that updates the bundle
+// (skills/agents/commands) and refreshes hook helpers in .claude/helpers/.
 // Usage: curl http://ruflo-hub:PORT/update-bundle | bash
 //    or: curl http://ruflo-hub:PORT/update-bundle | bash -s /path/to/project
-//    or: curl "http://ruflo-hub:PORT/update-bundle?force=1" | bash  (overwrite existing)
+//    or: curl "http://ruflo-hub:PORT/update-bundle?force=1" | bash  (overwrite existing bundle entries)
+// Hook helpers are always overwritten — they are server-managed.
 app.get('/update-bundle', (req, res) => {
   const serverHost = req.headers.host || `localhost:${PORT}`;
   const proto = req.headers['x-forwarded-proto'] || 'http';
@@ -316,7 +318,7 @@ if [ ! -d "\$PROJECT_DIR" ]; then
   exit 1
 fi
 
-mkdir -p "\$PROJECT_DIR/.claude"
+mkdir -p "\$PROJECT_DIR/.claude/helpers"
 TMP_BUNDLE="\$(mktemp -t ruflo-bundle.XXXXXX.tar.gz)"
 
 if ! curl -sf "${baseUrl}/bundle.tar.gz" -o "\$TMP_BUNDLE"; then
@@ -333,11 +335,18 @@ else
 fi
 rm -f "\$TMP_BUNDLE"
 
+# Refresh hook helpers (always overwrite — they are server-managed)
+for file in auto-memory-hook.mjs hook-handler.cjs intelligence-bridge.cjs statusline.cjs; do
+  curl -sf "${baseUrl}/templates/\$file" -o "\$PROJECT_DIR/.claude/helpers/\$file" \\
+    && echo "  ✓ .claude/helpers/\$file" \\
+    || echo "  ✗ .claude/helpers/\$file (skipped)"
+done
+
 echo "  ✓ .claude/skills   (\$(ls "\$PROJECT_DIR/.claude/skills"   2>/dev/null | wc -l | tr -d ' ') entries)"
 echo "  ✓ .claude/agents   (\$(ls "\$PROJECT_DIR/.claude/agents"   2>/dev/null | wc -l | tr -d ' ') entries)"
 echo "  ✓ .claude/commands (\$(ls "\$PROJECT_DIR/.claude/commands" 2>/dev/null | wc -l | tr -d ' ') entries)"
 echo ""
-echo "  Done. Restart Claude Code to load new skills."
+echo "  Done. Restart Claude Code to load new skills and helpers."
 echo ""
 `;
 
@@ -401,7 +410,7 @@ mkdir -p "\$PROJECT_DIR/.claude-flow/data"
 
 # Download templates
 echo "  Downloading templates..."
-for file in auto-memory-hook.mjs hook-handler.cjs statusline.cjs; do
+for file in auto-memory-hook.mjs hook-handler.cjs intelligence-bridge.cjs statusline.cjs; do
   if curl -sf "${baseUrl}/templates/\$file" -o "\$PROJECT_DIR/.claude/helpers/\$file"; then
     echo "    ✓ .claude/helpers/\$file"
   else

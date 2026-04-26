@@ -8,9 +8,13 @@
  * Commands:
  *   route          - Route a task to optimal agent (reads PROMPT from env/stdin)
  *   pre-bash       - Validate command safety before execution
- *   post-edit      - Record edit outcome for learning
- *   session-restore - Restore previous session state
- *   session-end    - End session and persist state
+ *   post-bash      - Record bash command for SONA trajectory
+ *   post-edit      - Record edit outcome for learning + SONA trajectory step
+ *   session-restore - Restore previous session state + open SONA trajectory
+ *   session-end    - End session, persist state, close SONA trajectory
+ *   pre-task       - Mark task start
+ *   post-task      - Mark task success in trajectory
+ *   stats          - Show intelligence stats
  */
 
 const path = require('path');
@@ -46,6 +50,17 @@ const router = safeRequire(path.join(helpersDir, 'router.js'));
 const session = safeRequire(path.join(helpersDir, 'session.js'));
 const memory = safeRequire(path.join(helpersDir, 'memory.js'));
 const intelligence = safeRequire(path.join(helpersDir, 'intelligence.cjs'));
+const ibridge = safeRequire(path.join(helpersDir, 'intelligence-bridge.cjs'));
+
+function ibCall(method, ...args) {
+  if (!ibridge || typeof ibridge[method] !== 'function') return Promise.resolve();
+  try {
+    const p = ibridge[method](...args);
+    return Promise.resolve(p).catch(() => {});
+  } catch (_) {
+    return Promise.resolve();
+  }
+}
 
 // ── Intelligence timeout protection (fixes #1530, #1531) ───────────────────
 const INTELLIGENCE_TIMEOUT_MS = 3000;
@@ -156,20 +171,26 @@ const handlers = {
     console.log('[OK] Command validated');
   },
 
-  'post-edit': () => {
+  'post-edit': async () => {
     // Record edit for session metrics
     if (session && session.metric) {
       try { session.metric('edits'); } catch (e) { /* no active session */ }
     }
+    const file = hookInput.file_path || toolInput.file_path
+      || process.env.TOOL_INPUT_file_path || args[0] || '';
     // Record edit for intelligence consolidation — prefer stdin data from Claude Code
     if (intelligence && intelligence.recordEdit) {
-      try {
-        const file = hookInput.file_path || toolInput.file_path
-          || process.env.TOOL_INPUT_file_path || args[0] || '';
-        intelligence.recordEdit(file);
-      } catch (e) { /* non-fatal */ }
+      try { intelligence.recordEdit(file); } catch (e) { /* non-fatal */ }
     }
+    // SONA trajectory step (fire-and-forget)
+    await ibCall('step', `edit:${toolName || 'Edit'}`, file);
     console.log('[OK] Edit recorded');
+  },
+
+  'post-bash': async () => {
+    const cmd = String(hookInput.command || toolInput.command || prompt || '').slice(0, 500);
+    await ibCall('step', 'bash', cmd);
+    console.log('[OK] Bash recorded');
   },
 
   'session-restore': async () => {
@@ -203,6 +224,8 @@ const handlers = {
         console.log(`[INTELLIGENCE] Loaded ${initResult.nodes} patterns, ${initResult.edges} edges`);
       }
     }
+    // Open SONA trajectory for this session
+    await ibCall('start', `Claude Code session in ${path.basename(process.env.CLAUDE_PROJECT_DIR || process.cwd())}`, 'claude-code');
   },
 
   'session-end': async () => {
@@ -213,6 +236,8 @@ const handlers = {
         console.log(`[INTELLIGENCE] Consolidated: ${consResult.entries} entries, ${consResult.edges} edges${consResult.newEntries > 0 ? `, ${consResult.newEntries} new` : ''}, PageRank recomputed`);
       }
     }
+    // Close SONA trajectory and trigger learning
+    await ibCall('end', true);
     if (session && session.end) {
       session.end();
     } else {
@@ -233,13 +258,14 @@ const handlers = {
     }
   },
 
-  'post-task': () => {
+  'post-task': async () => {
     // Implicit success feedback for intelligence
     if (intelligence && intelligence.feedback) {
       try {
         intelligence.feedback(true);
       } catch (e) { /* non-fatal */ }
     }
+    await ibCall('step', 'task-complete', null, 1.0);
     console.log('[OK] Task completed');
   },
 
