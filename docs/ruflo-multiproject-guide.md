@@ -155,9 +155,9 @@ Local mode (`.swarm/` on each machine) limits ruflo to a single developer. A cen
 ┌─────────────────────────────────────────────────────┐
 │  Dedicated server (ruflo-hub)                       │
 │                                                     │
-│  Ruflo MCP (stdio) → supergateway (SSE/HTTP)        │
+│  Ruflo MCP (stdio) → Express proxy (Streamable HTTP) │
 │  ├── RuVector → PostgreSQL     ← shared knowledge base  │
-│  └── port 3000                                      │
+│  └── port 3000 (/mcp)                               │
 └───────────────┬─────────────────┬───────────────────┘
                 │                 │
         ┌───────┘                 └────────┐
@@ -199,11 +199,11 @@ The server **does not access the filesystem of projects**, does not read source 
 
 ### Running the MCP server
 
-> **Important:** Ruflo MCP works only in stdio mode (v3.5). For network access, use [ruflo-hub](https://github.com/jazz-max/ruflo-hub) — a Docker container with a supergateway proxy that wraps stdio into SSE/HTTP.
+> **Important:** Ruflo MCP works only in stdio mode (v3.5). For network access, use [ruflo-hub](https://github.com/jazz-max/ruflo-hub) — a Docker container with an Express-based HTTP proxy (`server.mjs`) that wraps stdio into Streamable HTTP at `/mcp`.
 >
 > In stdio mode, claims, tasks, and hive-mind are visible between sessions **of one project**, but **not between projects** (each project has its own process). Details and the full table → [stdio mode limitations](#stdio-mode-limitations-important).
 
-> **Why not `--transport http`?** The ruflo CLI accepts the `--transport http` flag, but in the code `startHttpServer()` does `import('@claude-flow/mcp')` — this package **does not exist** (not published to npm, it's a placeholder for future functionality). Startup will fail with `Cannot find module '@claude-flow/mcp'`. The only working transport is stdio. For network access you need an external proxy (supergateway), and that's exactly what [ruflo-hub](https://github.com/jazz-max/ruflo-hub) does.
+> **Why not `--transport http`?** The ruflo CLI accepts the `--transport http` flag, but in the code `startHttpServer()` does `import('@claude-flow/mcp')` — this package **does not exist** (not published to npm, it's a placeholder for future functionality). Startup will fail with `Cannot find module '@claude-flow/mcp'`. The only working transport is stdio. For network access you need an external proxy, and that's exactly what [ruflo-hub](https://github.com/jazz-max/ruflo-hub) does via its Express-based HTTP proxy (`server.mjs`).
 
 **Method 1: Docker Compose** (recommended):
 
@@ -221,7 +221,7 @@ docker compose up -d
 curl http://localhost:3000/health
 ```
 
-> **Important:** The `jazzmax/ruflo-hub` image **does not contain PostgreSQL** — only Node.js, ruflo, supergateway, and postgresql-client. PostgreSQL is spun up in a separate container (`ruflo-db`) via docker-compose.
+> **Important:** The `jazzmax/ruflo-hub` image **does not contain PostgreSQL** — only Node.js, ruflo, the Express proxy (`server.mjs`), and postgresql-client. PostgreSQL is spun up in a separate container (`ruflo-db`) via docker-compose.
 
 **Method 1b: Docker Hub image** (if PostgreSQL already exists):
 
@@ -248,7 +248,7 @@ curl http://localhost:3000/health
 
 | Variable | Default | Description |
 |---|---|---|
-| `RUFLO_PORT` | `3000` | Port that supergateway listens on |
+| `RUFLO_PORT` | `3000` | Port that the Express proxy (`server.mjs`) listens on |
 | `POSTGRES_HOST` | `ruflo-db` | PostgreSQL host (in compose — the service name) |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `POSTGRES_DB` | `ruflo` | Database name |
@@ -258,36 +258,22 @@ curl http://localhost:3000/health
 
 Inside the container:
 ```
-Ruflo MCP (stdio) → supergateway (SSE/HTTP) → port 3000
+Ruflo MCP (stdio) → Express proxy (Streamable HTTP) → port 3000 (/mcp)
                           ↕
                     PostgreSQL + pgvector (RuVector)
 ```
 
 **Method 2: manual startup** (without Docker, if you need a custom setup):
 
-```bash
-npm install -g ruflo@latest pg supergateway
-
-# 1. PostgreSQL with pgvector must be installed and running
-# 2. Initialize RuVector
-npx ruflo ruvector init --database ruflo_team --user ruflo_admin --host localhost
-
-# 3. Start via supergateway
-npx supergateway \
-  --stdio "npx ruflo@latest mcp start" \
-  --port 3000 \
-  --baseUrl "http://0.0.0.0:3000" \
-  --ssePath /sse \
-  --messagePath /message
-```
+The canonical proxy for this project is `server.mjs` from the [ruflo-hub](https://github.com/jazz-max/ruflo-hub) repo — clone it and run `node server.mjs` directly (it spawns `ruflo mcp start` as a stdio child and exposes Streamable HTTP at `/mcp`).
 
 ### Connecting clients
 
-All clients connect to the SSE endpoint. Configuration is the same for all IDEs.
+All clients connect to the `/mcp` endpoint (Streamable HTTP). Configuration is the same for all IDEs.
 
 **Claude Code CLI:**
 ```bash
-claude mcp add ruflo-team --url http://your-server:3000/sse
+claude mcp add ruflo-team --url http://your-server:3000/mcp
 ```
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`),
@@ -299,7 +285,7 @@ claude mcp add ruflo-team --url http://your-server:3000/sse
 {
   "mcpServers": {
     "ruflo-team": {
-      "url": "http://your-server:3000/sse"
+      "url": "http://your-server:3000/mcp"
     }
   }
 }

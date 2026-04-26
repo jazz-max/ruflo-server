@@ -430,13 +430,31 @@ Files in `templates/` are served via `/templates/:name` and used by the `/setup`
 
 ## Backup
 
+The active memory lives in `/app/.swarm/memory.db` inside the ruflo container, mounted from the `<service>-memory` volume. **That volume is what you back up — `pg_dump` of the PostgreSQL database is not enough**, because the regular `memory_store` / `memory_search` tools write into sql.js, not into PostgreSQL. The `claude_flow.*` tables in PostgreSQL are used only by the optional `ruflo ruvector import/export` flow and may legitimately be empty.
+
 ```bash
-# Backup
-docker exec <postgres-container> pg_dump -U ruflo ruflo > backup.sql
+# Backup the memory volume (active memory + HNSW indexes)
+docker run --rm -v ruflo-server_ruflo-memory:/d -v "$PWD":/b alpine \
+  tar czf /b/ruflo-memory.tgz -C /d .
 
 # Restore
+docker run --rm -v ruflo-server_ruflo-memory:/d -v "$PWD":/b alpine \
+  sh -c "rm -rf /d/* && tar xzf /b/ruflo-memory.tgz -C /d"
+
+# Optional — PostgreSQL dump (only if you actively use ruvector import/export)
+docker exec <postgres-container> pg_dump -U ruflo ruflo > backup.sql
 cat backup.sql | docker exec -i <postgres-container> psql -U ruflo ruflo
 ```
+
+## Operational notes
+
+A few things that look broken but are normal — knowing them up front avoids unnecessary "fixes" that can cause data loss:
+
+- **`system_health` may report `score: 20/100, unhealthy`.** The check looks for marker files at default paths (`./.claude-flow/memory/store.json`, `./.claude-flow/config.json`) and ignores the real backend at `/app/.swarm/memory.db`. The entrypoint creates empty marker files on startup so other Claude instances don't suggest "run memory init" — this is cosmetic only. Use `memory_stats` to see real storage.
+- **Don't run `ruflo init` or `ruflo memory init` inside the container.** They would create a second store at the default path and split your data between two places. The container is preconfigured; the active store at `/app/.swarm/memory.db` already works.
+- **`claude_flow.embeddings` in PostgreSQL is normally empty (0 rows).** That table is for the RuVector backend (1536-dim), but the regular memory tools write 768-dim ONNX embeddings into sql.js. The two backends are independent. PostgreSQL is touched only by `ruflo ruvector import/export`.
+- **`memory_bridge_status: not-synced` is fine** if no project under `~/.claude/projects/*/memory/MEMORY.md` exists yet. The bridge has nothing to mirror; direct `memory_store` calls still work.
+- **High CPU at idle** comes from background controllers (consolidation, causal graph, nightly learner). They run regardless of whether you've fed them data.
 
 ## Updating ruflo
 

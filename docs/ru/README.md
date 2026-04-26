@@ -428,13 +428,31 @@ node .claude/helpers/auto-memory-hook.mjs import
 
 ## Бекап
 
+Активная память живёт в `/app/.swarm/memory.db` внутри контейнера ruflo и монтируется из volume `<service>-memory`. **Бэкапить нужно именно этот volume — `pg_dump` базы PostgreSQL не покрывает память**, потому что обычные `memory_store` / `memory_search` пишут в sql.js, а не в PostgreSQL. Таблицы `claude_flow.*` в PostgreSQL используются только опциональным `ruflo ruvector import/export` и легитимно могут быть пустыми.
+
 ```bash
-# Бекап
-docker exec <postgres-container> pg_dump -U ruflo ruflo > backup.sql
+# Бэкап volume памяти (активная память + HNSW-индексы)
+docker run --rm -v ruflo-server_ruflo-memory:/d -v "$PWD":/b alpine \
+  tar czf /b/ruflo-memory.tgz -C /d .
 
 # Восстановление
+docker run --rm -v ruflo-server_ruflo-memory:/d -v "$PWD":/b alpine \
+  sh -c "rm -rf /d/* && tar xzf /b/ruflo-memory.tgz -C /d"
+
+# Опционально — дамп PostgreSQL (только если реально используется ruvector import/export)
+docker exec <postgres-container> pg_dump -U ruflo ruflo > backup.sql
 cat backup.sql | docker exec -i <postgres-container> psql -U ruflo ruflo
 ```
+
+## Эксплуатационные особенности
+
+Несколько вещей, которые выглядят сломанными, но являются нормой — лучше знать их сразу, чтобы не пытаться «починить» то, что работает (и не потерять при этом данные):
+
+- **`system_health` может показывать `score: 20/100, unhealthy`.** Проверка ищет маркер-файлы по дефолтным путям (`./.claude-flow/memory/store.json`, `./.claude-flow/config.json`) и игнорирует реальный backend в `/app/.swarm/memory.db`. Entrypoint создаёт пустые маркер-файлы при старте, чтобы другие инстансы Claude перестали предлагать «run memory init» — это косметика. Реальное состояние смотри через `memory_stats`.
+- **Не запускайте `ruflo init` или `ruflo memory init` внутри контейнера.** Они создадут второе хранилище по дефолтному пути и расщепят данные между двумя backend'ами. Контейнер преднастроен; активное хранилище в `/app/.swarm/memory.db` уже работает.
+- **`claude_flow.embeddings` в PostgreSQL обычно пуст (0 строк).** Эта таблица — для RuVector-backend'а (1536-dim), а обычные memory-инструменты пишут 768-dim ONNX-эмбеддинги в sql.js. Это два независимых backend'а. К PostgreSQL обращается только `ruflo ruvector import/export`.
+- **`memory_bridge_status: not-synced` — норма**, если в `~/.claude/projects/*/memory/MEMORY.md` ни одного файла ещё нет. Мосту нечего зеркалить; прямые вызовы `memory_store` работают.
+- **Высокий CPU в простое** — фоновые контроллеры (consolidation, causal graph, nightly learner) крутятся независимо от того, есть ли у них данные.
 
 ## Обновление ruflo
 
