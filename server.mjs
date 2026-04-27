@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import express from 'express';
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync, createWriteStream, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
@@ -25,19 +25,46 @@ function ts() {
 // callTool() throws with that message. To survive that, we wrap the connect
 // step in a function and respawn the child when the transport reports close.
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 5000, 5000, 5000];
+const STDERR_LOG_PATH = '/app/.swarm/ruflo-stderr.log';
 let client = null;
 let toolsResult = { tools: [] };
 let connectionState = 'connecting'; // 'connecting' | 'ready' | 'down'
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 
-async function connectToRuflo() {
+// Persistent stats so /health can show whether reconnects have been happening.
+const stats = {
+  startedAt: new Date().toISOString(),
+  reconnectCount: 0,         // successful reconnects (excluding initial start)
+  reconnectFailures: 0,      // failed attempts since last successful connect
+  lastReconnectAt: null,
+  lastReconnectReason: null, // 'transport-close' | 'callTool-failure' | 'startup'
+  currentConnectedSince: null,
+};
+
+// Persistent stderr log of the ruflo child — survives container restarts via
+// the .swarm volume. Use this to find what killed the child if /health shows
+// reconnectCount > 0.
+let stderrLog = null;
+try {
+  mkdirSync(dirname(STDERR_LOG_PATH), { recursive: true });
+  stderrLog = createWriteStream(STDERR_LOG_PATH, { flags: 'a' });
+  stderrLog.write(`\n=== server.mjs started at ${stats.startedAt} ===\n`);
+} catch (err) {
+  console.error(`[${ts()}] Failed to open ${STDERR_LOG_PATH}:`, err?.message || err);
+}
+
+async function connectToRuflo(reason) {
   connectionState = 'connecting';
-  console.log(`[${ts()}] Connecting to ruflo stdio (attempt ${reconnectAttempts + 1})...`);
+  console.log(`[${ts()}] Connecting to ruflo stdio (attempt ${reconnectAttempts + 1}, reason: ${reason})...`);
+  if (stderrLog) {
+    stderrLog.write(`\n--- [${new Date().toISOString()}] reconnect attempt ${reconnectAttempts + 1} (reason: ${reason}) ---\n`);
+  }
 
   const transport = new StdioClientTransport({
     command: 'ruflo',
     args: ['mcp', 'start'],
+    stderr: 'pipe', // capture child stderr so we can persist it
   });
 
   // Wire up close/error BEFORE connect so we don't miss an immediate failure.
@@ -45,7 +72,7 @@ async function connectToRuflo() {
     if (connectionState === 'down') return; // already scheduled
     console.error(`[${ts()}] ruflo stdio transport closed — scheduling reconnect`);
     connectionState = 'down';
-    scheduleReconnect();
+    scheduleReconnect('transport-close');
   };
   transport.onerror = (err) => {
     console.error(`[${ts()}] ruflo stdio transport error:`, err?.message || err);
@@ -54,31 +81,47 @@ async function connectToRuflo() {
   const newClient = new Client({ name: 'ruflo-proxy', version: '1.0.0' });
   await newClient.connect(transport);
 
+  // Pipe child stderr to the persistent log. transport.stderr is a Readable
+  // stream when stderr: 'pipe' is set above.
+  if (stderrLog && transport.stderr) {
+    transport.stderr.on('data', (chunk) => stderrLog.write(chunk));
+    transport.stderr.on('error', () => { /* ignore — file write errors */ });
+  }
+
   // Refresh tool list every time we reconnect (ruflo could have updated).
   const tools = await newClient.listTools();
   client = newClient;
   toolsResult = tools;
   connectionState = 'ready';
+  // Track stats: count this as a reconnect only if it's not the initial startup.
+  if (reason !== 'startup') {
+    stats.reconnectCount += 1;
+    stats.lastReconnectAt = new Date().toISOString();
+    stats.lastReconnectReason = reason;
+  }
+  stats.reconnectFailures = 0;
+  stats.currentConnectedSince = new Date().toISOString();
   reconnectAttempts = 0;
   console.log(`[${ts()}] Connected to ruflo: ${tools.tools.length} tools`);
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(reason) {
   if (reconnectTimer) return;
   const delay = RECONNECT_BACKOFF_MS[Math.min(reconnectAttempts, RECONNECT_BACKOFF_MS.length - 1)];
   reconnectAttempts += 1;
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
     try {
-      await connectToRuflo();
+      await connectToRuflo(reason);
     } catch (err) {
+      stats.reconnectFailures += 1;
       console.error(`[${ts()}] Reconnect failed:`, err?.message || err);
-      scheduleReconnect();
+      scheduleReconnect(reason);
     }
   }, delay);
 }
 
-await connectToRuflo();
+await connectToRuflo('startup');
 
 // Call with one transparent retry if the stdio child just died.
 async function callToolReliably(name, args) {
@@ -89,10 +132,10 @@ async function callToolReliably(name, args) {
     if (connectionState !== 'ready' || /Not connected|Connection closed/i.test(msg)) {
       // Force a reconnect attempt right now and retry once.
       try {
-        await connectToRuflo();
+        await connectToRuflo('callTool-failure');
         return await client.callTool({ name, arguments: args });
       } catch (retryErr) {
-        scheduleReconnect();
+        scheduleReconnect('callTool-failure');
         throw retryErr;
       }
     }
@@ -181,15 +224,22 @@ app.delete('/mcp', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
-  if (connectionState === 'ready') {
-    res.json({ status: 'ok', tools: toolsResult.tools.length });
+  const body = {
+    status: connectionState === 'ready' ? 'ok' : 'unavailable',
+    state: connectionState,
+    tools: toolsResult.tools.length,
+    serverStartedAt: stats.startedAt,
+    currentConnectedSince: stats.currentConnectedSince,
+    reconnectCount: stats.reconnectCount,
+    reconnectFailures: stats.reconnectFailures,
+    lastReconnectAt: stats.lastReconnectAt,
+    lastReconnectReason: stats.lastReconnectReason,
+  };
+  if (connectionState !== 'ready') {
+    body.reason = 'ruflo stdio transport down — reconnect in progress';
+    res.status(503).json(body);
   } else {
-    res.status(503).json({
-      status: 'unavailable',
-      reason: 'ruflo stdio transport down — reconnect in progress',
-      state: connectionState,
-      tools: toolsResult.tools.length,
-    });
+    res.json(body);
   }
 });
 
