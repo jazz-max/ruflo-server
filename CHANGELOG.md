@@ -1,63 +1,66 @@
 # Changelog
 
-Формат — [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
-Образ публикуется в Docker Hub: `jazzmax/ruflo-hub:<version>` (для каждого выпуска), `:latest` — всегда последний main, `:<git-sha>` — для трейсинга.
+The image is published to Docker Hub: `jazzmax/ruflo-hub:<version>` (per release), `:latest` (always the latest `main`), `:<git-sha>` (for tracing).
+
+Russian version: [`docs/ru/CHANGELOG.md`](docs/ru/CHANGELOG.md).
 
 ## [Unreleased]
 
 ## [1.1.2] — 2026-05-01
 
 ### Fixed
-- **Утечка stdio-детей `ruflo mcp start` в `server.mjs`.** В 1.1.0 авто-реконнект (`transport.onclose` + `callTool-failure` retry) не был single-flight: N параллельных HTTP-запросов, поймавших `Not connected`, спавнили N свежих `ruflo mcp start` процессов; глобальный `client` перезаписывался последним, но старые child-процессы оставались жить — их stdio-pipes держал транспорт-объект, на который никто уже не ссылался. За 4 дня в проде накопилось 123 осиротевших процесса и **4.2 ГБ RAM** (cgroup `anon`).
-- **Single-flight `connectToRuflo`** через `connectingPromise` — все параллельные вызовы дожидаются одного коннекта.
-- **Явный SIGTERM старого child'а** перед спавном нового: `transport.close()` (fire-and-forget, чтобы не блокировать реконнект на 0–4 c grace-периода SDK).
-- **Onclose от стейл-транспортов игнорируется** (`transport !== currentTransport`) — иначе агония осиротевшего ребёнка триггерила лишний реконнект.
-- Стресс-тест: 5 раундов × 8 параллельных запросов + `kill -9` child'а посреди — каждый раунд ровно 1 reconnect, 1 child, RAM стабильна на 79 МБ. До патча тот же сценарий оставлял 4–5 осиротевших процессов за раунд.
+- **stdio child leak in `server.mjs` (`ruflo mcp start` zombies).** The 1.1.0 auto-reconnect (`transport.onclose` + `callTool-failure` retry) was not single-flight: N concurrent HTTP requests that hit `Not connected` each called `connectToRuflo()` in parallel and spawned N fresh `ruflo mcp start` processes. The global `client` was overwritten by the last winner, but the previous children kept running — their stdio pipes were held by transport objects no longer referenced anywhere. Over 4 days in production this accumulated to **123 orphaned processes and 4.2 GB of RAM** (cgroup `anon`).
+- **Single-flight `connectToRuflo`** via `connectingPromise` — concurrent callers all await the same in-flight promise.
+- **Explicit SIGTERM of the previous child** before spawning a new one: `transport.close()` is fire-and-forget so the SDK's 0–4 s grace period never blocks reconnect.
+- **Stale-transport `onclose` is now ignored** (`transport !== currentTransport`) — otherwise the death-throes of an orphaned child triggered an extra reconnect.
+- Stress test: 5 rounds × 8 concurrent requests + `kill -9` the child mid-flight. Each round produced exactly 1 reconnect, 1 child, RAM steady at 79 MiB. Pre-patch the same scenario leaked 4–5 orphans per round.
 
 ## [1.1.1] — 2026-04-29
 
 ### Fixed
-- **Документация: пропущенные volumes в примерах встраивания.** Все три варианта в README (en + ru) монтировали только `ruflo-pgdata`, без `ruflo-memory:/app/.swarm` и `ruflo-state:/app/.claude-flow`. Из-за этого при `docker compose pull && up -d` контейнер пересоздавался и terять `memory.db`. Добавлены volume mappings во все варианты + крупный WARNING-блок в начале раздела «Embedding as a service».
-- Раздел [Migrating an existing deployment to volumes](README.md#migrating-an-existing-deployment-to-volumes) — пошаговый план миграции живых данных в named volume без потерь, для тех кто уже задеплоил без volumes.
+- **Docs: missing volumes in embedding examples.** All three variants in the README (en + ru) mounted only `ruflo-pgdata`, omitting `ruflo-memory:/app/.swarm` and `ruflo-state:/app/.claude-flow`. As a result, `docker compose pull && up -d` recreated the container and lost `memory.db`. Volume mappings were added to all variants, plus a prominent WARNING block at the top of the "Embedding as a service" section.
+- New section [Migrating an existing deployment to volumes](README.md#migrating-an-existing-deployment-to-volumes) — a step-by-step migration plan that moves live data into a named volume without loss, for users who already deployed without volumes.
 
 ### Added
-- **Runtime-warning в `entrypoint.sh`**: проверяет через `mountpoint -q`, что `/app/.swarm` и `/app/.claude-flow` примонтированы из volume. Если нет — крупный блок в `stderr` контейнера с точной YAML-вставкой для compose. Работает на каждом старте.
+- **Runtime warning in `entrypoint.sh`**: uses `mountpoint -q` to verify that `/app/.swarm` and `/app/.claude-flow` are mounted from a volume. If not, it prints a prominent block to the container's `stderr` with the exact YAML snippet to paste into compose. Runs on every start.
 
 ## [1.1.0] — 2026-04-27
 
 ### Added
-- **SONA pattern bridge** в client bundle (`templates/intelligence-bridge.cjs` + хуки в `hook-handler.cjs`). Каждое действие Claude Code (`Edit`/`Bash`/`task-complete`/`session-end`) пишется как pattern в `pattern`-namespace через `hooks_intelligence_pattern-store`. На session-end сохраняется агрегированный summary.
-- **Авто-реконнект** stdio child `ruflo mcp start` в `server.mjs`. При смерти child (`transport.onclose`) — back-off-таймер от 0.5 до 5 c с автоматическим respawn. `callTool` с прозрачным retry'ем при `Not connected`/`Connection closed`.
-- **Persistent stderr-лог** ruflo CLI: `/app/.swarm/ruflo-stderr.log` (на volume, переживает рестарт контейнера). Туда же пишутся отметки о каждой попытке реконнекта с причиной.
-- **Расширенный `/health`**: теперь включает `state`, `serverStartedAt`, `currentConnectedSince`, `reconnectCount`, `reconnectFailures`, `lastReconnectAt`, `lastReconnectReason`. Возвращает `503` если transport не в `ready` (Docker healthcheck перестаёт врать).
-- **Stub-файлы для `system_health`**: `/app/.claude-flow/{config.json,memory/store.json}` создаются в `entrypoint.sh`, чтобы клиенты не предлагали `ruflo init`. Рядом всегда лежит маркер `.migrated-to-sqlite`, иначе `memory_store` падает с null-deref на пустом stub.
-- **Раздача `intelligence-bridge.cjs`** через `/setup` и `/update-bundle`. `/update-bundle` теперь всегда перезаписывает helpers (они серверные).
-- **Operational notes** в README (en + ru): известные особенности `system_health`, `claude_flow.embeddings`, `memory_bridge_status`, фоновые контроллеры.
+- **SONA pattern bridge** in the client bundle (`templates/intelligence-bridge.cjs` + hooks in `hook-handler.cjs`). Every Claude Code action (`Edit` / `Bash` / `task-complete` / `session-end`) is written as a pattern in the `pattern` namespace via `hooks_intelligence_pattern-store`. An aggregated summary is stored on `session-end`.
+- **Auto-reconnect** for the stdio child `ruflo mcp start` in `server.mjs`. When the child dies (`transport.onclose`), a back-off timer between 0.5 and 5 s respawns it automatically. `callTool` retries transparently on `Not connected` / `Connection closed`.
+- **Persistent stderr log** for the ruflo CLI: `/app/.swarm/ruflo-stderr.log` (on a volume, survives container restarts). Each reconnect attempt is recorded there with its reason.
+- **Extended `/health`**: now includes `state`, `serverStartedAt`, `currentConnectedSince`, `reconnectCount`, `reconnectFailures`, `lastReconnectAt`, `lastReconnectReason`. Returns `503` when the transport is not in `ready` state (the Docker healthcheck no longer lies).
+- **Stub files for `system_health`**: `/app/.claude-flow/{config.json,memory/store.json}` are created by `entrypoint.sh` so clients stop suggesting `ruflo init`. Alongside them sits the migration marker `.migrated-to-sqlite` — without it, `memory_store` crashes with a null-deref on the empty stub.
+- **`intelligence-bridge.cjs` is shipped** through `/setup` and `/update-bundle`. `/update-bundle` now always overwrites helpers (they are server-owned).
+- **Operational notes** in the README (en + ru): known quirks of `system_health`, `claude_flow.embeddings`, `memory_bridge_status`, and the background controllers.
 
 ### Fixed
-- **Краш `memory_store: Cannot convert undefined or null to object`** — миграционный маркер `.migrated-to-sqlite` отключает code path в `memory-tools.js`, который ошибочно считал stub-`store.json` legacy-дампом и вызывал `Object.keys(legacyStore.entries).length` на `undefined`.
-- **Утрата записей при крахе stdio child**: до 1.1.0 контейнер мог 13+ часов отвечать `Not connected` на каждый MCP-вызов, а `/health` показывать `200 OK` (использовался кэш `tools/list` со старта). Теперь child авто-перезапускается, `/health` сигнализирует degraded-state.
-- **Неточности в документации**: убраны упоминания `supergateway` (не используется в этой сборке — у нас собственный Express-прокси `server.mjs`). Заменено `all-MiniLM-L6-v2 384-dim` на корректное `1536-dim (RuVector)` с пометкой про активный sql.js (768-dim) backend.
-- **Backup-инструкции** переписаны (en + ru): бэкапить нужно volume `<service>-memory`, а не `pg_dump` — основная память живёт в `/app/.swarm/memory.db`, PostgreSQL обычно пуст и используется только для `ruvector import/export`.
+- **Crash `memory_store: Cannot convert undefined or null to object`** — the `.migrated-to-sqlite` migration marker disables the code path in `memory-tools.js` that treated the stub `store.json` as a legacy dump and called `Object.keys(legacyStore.entries).length` on `undefined`.
+- **Lost writes when the stdio child crashes**: prior to 1.1.0, the container could spend 13+ hours replying `Not connected` to every MCP call while `/health` returned `200 OK` (using the `tools/list` cache from startup). The child is now auto-restarted and `/health` signals degraded state.
+- **Documentation inaccuracies**: references to `supergateway` were removed (not used in this build — we have our own Express proxy `server.mjs`). `all-MiniLM-L6-v2 384-dim` was corrected to `1536-dim (RuVector)`, with a note about the active sql.js (768-dim) backend.
+- **Backup instructions** rewritten (en + ru): the volume to back up is `<service>-memory`, not a `pg_dump` — the primary memory lives in `/app/.swarm/memory.db`, while PostgreSQL is normally empty and used only for `ruvector import/export`.
 
 ### Reported upstream
-- [ruvnet/ruflo#1647](https://github.com/ruvnet/ruflo/issues/1647): `trajectory-*` API не персистит трекинг-данные в SQLite + null-deref в `hooks_intelligence_stats` / `memory_bridge_status` / migration code в `memory_store`.
+- [ruvnet/ruflo#1647](https://github.com/ruvnet/ruflo/issues/1647): the `trajectory-*` API does not persist tracking data to SQLite, plus null-derefs in `hooks_intelligence_stats` / `memory_bridge_status` / migration code in `memory_store`.
 
 ## [1.0.0] — 2026-04-22
 
-Первая отслеженная версия. Основные фичи к этому моменту:
+First tracked version. Main features at this point:
 
-- Docker-обёртка вокруг `ruflo` CLI: `server.mjs` (Express + MCP stdio client) + Dockerfile + docker-compose.
-- `/mcp` (Streamable HTTP JSON-RPC), `/health`, `/stats` (с `dbSizeKB`, intelligence-метриками).
-- `/setup` и `/update-bundle` — self-configuring shell scripts, разворачивающие `.claude/helpers/{auto-memory-hook.mjs,hook-handler.cjs,statusline.cjs}` + `.claude/{skills,agents,commands}` в проекте.
-- Memory bridge: `auto-memory-hook.mjs` — импорт паттернов из ruflo-personal на `SessionStart`, sync на `Stop`.
-- Опциональный PostgreSQL/pgvector (lean mode, если PG недоступен). Авто-инициализация схемы `claude_flow` через `ruvector init`.
-- Поддержка мульти-инстансов (несколько контейнеров на разных портах с отдельными PG-базами `ruflo_alpha`, `ruflo_beta`).
-- CI: GitHub Actions собирает образ на каждый push в `main` и еженедельно (Mon 6:00 UTC), пушит `latest` + `<sha>` в Docker Hub.
-- Двуязычная документация (en + ru).
+- Docker wrapper around the `ruflo` CLI: `server.mjs` (Express + MCP stdio client) + Dockerfile + docker-compose.
+- `/mcp` (Streamable HTTP JSON-RPC), `/health`, `/stats` (with `dbSizeKB` and intelligence metrics).
+- `/setup` and `/update-bundle` — self-configuring shell scripts that install `.claude/helpers/{auto-memory-hook.mjs,hook-handler.cjs,statusline.cjs}` + `.claude/{skills,agents,commands}` into the target project.
+- Memory bridge: `auto-memory-hook.mjs` — imports patterns from ruflo-personal on `SessionStart`, syncs on `Stop`.
+- Optional PostgreSQL/pgvector (lean mode if PG is unavailable). Auto-initialises the `claude_flow` schema via `ruvector init`.
+- Multi-instance support (several containers on different ports, each with its own PG database — `ruflo_alpha`, `ruflo_beta`).
+- CI: GitHub Actions builds the image on every push to `main` and weekly (Mon 06:00 UTC), pushes `latest` + `<sha>` to Docker Hub.
+- Bilingual documentation (en + ru).
 
-[Unreleased]: https://github.com/jazz-max/ruflo-hub/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/jazz-max/ruflo-hub/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/jazz-max/ruflo-hub/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/jazz-max/ruflo-hub/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jazz-max/ruflo-hub/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jazz-max/ruflo-hub/releases/tag/v1.0.0
