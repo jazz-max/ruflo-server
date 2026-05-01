@@ -31,6 +31,12 @@ let toolsResult = { tools: [] };
 let connectionState = 'connecting'; // 'connecting' | 'ready' | 'down'
 let reconnectAttempts = 0;
 let reconnectTimer = null;
+// Single-flight guard for connectToRuflo — без него N параллельных HTTP-запросов,
+// поймавших "Not connected", спавнили N свежих `ruflo mcp start` детей; старые
+// stdio-транспорты переставали быть активными, но child-процессы оставались
+// висеть. За несколько дней набегало >100 осиротевших процессов и >4 ГБ RAM.
+let connectingPromise = null;
+let currentTransport = null;
 
 // Persistent stats so /health can show whether reconnects have been happening.
 const stats = {
@@ -55,54 +61,84 @@ try {
 }
 
 async function connectToRuflo(reason) {
-  connectionState = 'connecting';
-  console.log(`[${ts()}] Connecting to ruflo stdio (attempt ${reconnectAttempts + 1}, reason: ${reason})...`);
-  if (stderrLog) {
-    stderrLog.write(`\n--- [${new Date().toISOString()}] reconnect attempt ${reconnectAttempts + 1} (reason: ${reason}) ---\n`);
+  // Single-flight: если коннект уже в процессе, все параллельные вызовы
+  // дожидаются того же промиса. Без этого callTool-failure от N параллельных
+  // запросов спавнил N свежих stdio-детей.
+  if (connectingPromise) return connectingPromise;
+  connectingPromise = (async () => {
+    connectionState = 'connecting';
+    console.log(`[${ts()}] Connecting to ruflo stdio (attempt ${reconnectAttempts + 1}, reason: ${reason})...`);
+    if (stderrLog) {
+      stderrLog.write(`\n--- [${new Date().toISOString()}] reconnect attempt ${reconnectAttempts + 1} (reason: ${reason}) ---\n`);
+    }
+
+    // Прибиваем предыдущего ребёнка ДО спавна нового, чтобы не оставлять
+    // осиротевшие `ruflo mcp start` процессы. close() шлёт SIGTERM, ждёт 2с,
+    // затем SIGKILL — мы fire-and-forget, не блокируем реконнект.
+    const oldTransport = currentTransport;
+    currentTransport = null;
+    if (oldTransport) {
+      oldTransport.onclose = () => {}; // глушим — иначе триггернёт лишний reconnect
+      oldTransport.onerror = () => {};
+      Promise.resolve()
+        .then(() => oldTransport.close())
+        .catch(() => { /* best effort */ });
+    }
+
+    const transport = new StdioClientTransport({
+      command: 'ruflo',
+      args: ['mcp', 'start'],
+      stderr: 'pipe', // capture child stderr so we can persist it
+    });
+
+    // Wire up close/error BEFORE connect so we don't miss an immediate failure.
+    transport.onclose = () => {
+      // Игнорируем close от стейл-транспортов (они приходят от детей,
+      // которых мы уже заменили на новых).
+      if (transport !== currentTransport) return;
+      if (connectionState === 'down') return; // already scheduled
+      console.error(`[${ts()}] ruflo stdio transport closed — scheduling reconnect`);
+      connectionState = 'down';
+      scheduleReconnect('transport-close');
+    };
+    transport.onerror = (err) => {
+      if (transport !== currentTransport) return;
+      console.error(`[${ts()}] ruflo stdio transport error:`, err?.message || err);
+    };
+
+    const newClient = new Client({ name: 'ruflo-proxy', version: '1.0.0' });
+    await newClient.connect(transport);
+
+    // Pipe child stderr to the persistent log. transport.stderr is a Readable
+    // stream when stderr: 'pipe' is set above.
+    if (stderrLog && transport.stderr) {
+      transport.stderr.on('data', (chunk) => stderrLog.write(chunk));
+      transport.stderr.on('error', () => { /* ignore — file write errors */ });
+    }
+
+    // Refresh tool list every time we reconnect (ruflo could have updated).
+    const tools = await newClient.listTools();
+    client = newClient;
+    currentTransport = transport;
+    toolsResult = tools;
+    connectionState = 'ready';
+    // Track stats: count this as a reconnect only if it's not the initial startup.
+    if (reason !== 'startup') {
+      stats.reconnectCount += 1;
+      stats.lastReconnectAt = new Date().toISOString();
+      stats.lastReconnectReason = reason;
+    }
+    stats.reconnectFailures = 0;
+    stats.currentConnectedSince = new Date().toISOString();
+    reconnectAttempts = 0;
+    console.log(`[${ts()}] Connected to ruflo: ${tools.tools.length} tools`);
+  })();
+
+  try {
+    await connectingPromise;
+  } finally {
+    connectingPromise = null;
   }
-
-  const transport = new StdioClientTransport({
-    command: 'ruflo',
-    args: ['mcp', 'start'],
-    stderr: 'pipe', // capture child stderr so we can persist it
-  });
-
-  // Wire up close/error BEFORE connect so we don't miss an immediate failure.
-  transport.onclose = () => {
-    if (connectionState === 'down') return; // already scheduled
-    console.error(`[${ts()}] ruflo stdio transport closed — scheduling reconnect`);
-    connectionState = 'down';
-    scheduleReconnect('transport-close');
-  };
-  transport.onerror = (err) => {
-    console.error(`[${ts()}] ruflo stdio transport error:`, err?.message || err);
-  };
-
-  const newClient = new Client({ name: 'ruflo-proxy', version: '1.0.0' });
-  await newClient.connect(transport);
-
-  // Pipe child stderr to the persistent log. transport.stderr is a Readable
-  // stream when stderr: 'pipe' is set above.
-  if (stderrLog && transport.stderr) {
-    transport.stderr.on('data', (chunk) => stderrLog.write(chunk));
-    transport.stderr.on('error', () => { /* ignore — file write errors */ });
-  }
-
-  // Refresh tool list every time we reconnect (ruflo could have updated).
-  const tools = await newClient.listTools();
-  client = newClient;
-  toolsResult = tools;
-  connectionState = 'ready';
-  // Track stats: count this as a reconnect only if it's not the initial startup.
-  if (reason !== 'startup') {
-    stats.reconnectCount += 1;
-    stats.lastReconnectAt = new Date().toISOString();
-    stats.lastReconnectReason = reason;
-  }
-  stats.reconnectFailures = 0;
-  stats.currentConnectedSince = new Date().toISOString();
-  reconnectAttempts = 0;
-  console.log(`[${ts()}] Connected to ruflo: ${tools.tools.length} tools`);
 }
 
 function scheduleReconnect(reason) {
